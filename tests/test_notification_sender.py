@@ -2192,7 +2192,7 @@ class TestTelegramSender(unittest.TestCase):
         self.assertTrue(result)
         first_payload = mock_post.call_args_list[0][1]["json"]
         second_payload = mock_post.call_args_list[1][1]["json"]
-        self.assertEqual(first_payload["text"], "关注 *AAPL* \\(未闭合\\)")
+        self.assertEqual(first_payload["text"], "关注 *AAPL* (未闭合)")
         self.assertEqual(second_payload["text"], content)
 
     @mock.patch("src.notification_sender.telegram_sender.requests.post")
@@ -2216,7 +2216,9 @@ class TestTelegramSender(unittest.TestCase):
         rendered = payload["text"]
         self.assertIn("日报", rendered)
         self.assertIn("📊 分析结果摘要", rendered)
-        self.assertIn("| 股票 | 信号 |", rendered)
+        self.assertIn("▪️ *600519*", rendered)
+        self.assertIn("信号 强势", rendered)
+        self.assertNotIn("| --- |", rendered)
         self.assertIn("[详情](https://example.com/report)", rendered)
         self.assertNotIn("# 日报", rendered)
 
@@ -2275,7 +2277,7 @@ class TestTelegramSender(unittest.TestCase):
         mock_post.return_value = _response(200, {"ok": True})
         cfg = _config(telegram_bot_token="BOT", telegram_chat_id="CHAT")
         sender = TelegramSender(cfg)
-        content = "(" * 4090
+        content = "[" * 4090
 
         result = sender.send_to_telegram(content)
 

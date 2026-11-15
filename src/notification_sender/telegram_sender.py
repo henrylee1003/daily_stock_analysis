@@ -19,6 +19,56 @@ from src.formatters import _custom_unit_to_index, strip_hidden_markdown_metadata
 logger = logging.getLogger(__name__)
 
 
+_TABLE_SEP_RE = re.compile(r'^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$')
+_EMPTY_CELL_VALUES = {'', 'n/a', 'na', '-', '--', 'none', 'null'}
+
+
+def _split_table_row(line: str) -> list:
+    """Split a markdown table row into stripped cells."""
+    row = line.strip()
+    if row.startswith('|'):
+        row = row[1:]
+    if row.endswith('|'):
+        row = row[:-1]
+    return [cell.strip().replace('\\', '') for cell in row.split('|')]
+
+
+def _markdown_tables_to_lists(text: str) -> str:
+    """Telegram cannot render markdown tables; turn each row into a short list item."""
+    lines = text.split('\n')
+    out = []
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        is_table_start = (
+            '|' in line
+            and i + 1 < len(lines)
+            and _TABLE_SEP_RE.match(lines[i + 1])
+        )
+        if not is_table_start:
+            out.append(line)
+            i += 1
+            continue
+
+        headers = _split_table_row(line)
+        i += 2  # skip header + separator
+        while i < len(lines) and '|' in lines[i] and lines[i].strip():
+            cells = _split_table_row(lines[i])
+            i += 1
+            if not cells or not any(cells):
+                continue
+            title = cells[0]
+            details = []
+            for header, value in zip(headers[1:], cells[1:]):
+                if value.lower() in _EMPTY_CELL_VALUES:
+                    continue
+                details.append(f"{header} {value}" if header else value)
+            out.append(f"▪️ *{title}*" if title else "▪️")
+            if details:
+                out.append("　" + "｜".join(details))
+    return '\n'.join(out)
+
+
 class TelegramSender:
 
     def __init__(self, config: Config):
@@ -89,6 +139,9 @@ class TelegramSender:
             if not sanitized_content:
                 logger.warning("Telegram 消息内容为空，跳过推送")
                 return False
+
+            # Telegram has no table support; render tables as lists instead
+            sanitized_content = _markdown_tables_to_lists(sanitized_content)
 
             telegram_content = self._convert_to_telegram_markdown(sanitized_content)
 
@@ -409,7 +462,7 @@ class TelegramSender:
         result = re.sub(r'\[([^\]]+)\]\(([^)]+)\)', _save_link, result)
 
         # Step 2: escape remaining special chars
-        for char in ['[', ']', '(', ')']:
+        for char in ['[']:
             result = result.replace(char, f'\\{char}')
 
         # Step 3: restore links
