@@ -444,6 +444,11 @@ class NotificationService(
         report_date: Optional[str] = None,
     ) -> str:
         """Generate the aggregate report content used by merge/save/push paths."""
+        # REPORT_COMPACT=true: short phone report (conclusion, holding, earnings, flows)
+        from src.compact_report import compact_report_enabled, generate_compact_report
+
+        if compact_report_enabled():
+            return generate_compact_report(self, results, report_date=report_date)
         normalized_type = self._normalize_report_type(report_type)
         if normalized_type == ReportType.BRIEF:
             return self.generate_brief_report(results, report_date=report_date)

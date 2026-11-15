@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 
 _TABLE_SEP_RE = re.compile(r'^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$')
 _EMPTY_CELL_VALUES = {'', 'n/a', 'na', '-', '--', 'none', 'null'}
+_NUMERIC_CELL_RE = re.compile(r'^[+-]?[\d,]+(\.\d+)?%?$')
 
 
 def _split_table_row(line: str) -> list:
@@ -59,7 +60,17 @@ def _markdown_tables_to_lists(text: str) -> str:
             i += 1
             if not cells or not any(cells):
                 continue
+            # Two-column "label | value" tables: one line each, e.g. "• MA5：769.26"
+            if len(headers) == 2 and len(cells) >= 2:
+                label, value = cells[0], cells[1]
+                if value.lower() in _EMPTY_CELL_VALUES:
+                    continue
+                out.append(f"• {label}：{value}" if label else f"• {value}")
+                continue
             title = cells[0]
+            # A bare number as row title is meaningless; prefix the first header
+            if title and headers and headers[0] and _NUMERIC_CELL_RE.match(title):
+                title = f"{headers[0]} {title}"
             details = []
             for header, value in zip(headers[1:], cells[1:]):
                 if value.lower() in _EMPTY_CELL_VALUES:

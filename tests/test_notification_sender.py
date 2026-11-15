@@ -2216,8 +2216,7 @@ class TestTelegramSender(unittest.TestCase):
         rendered = payload["text"]
         self.assertIn("日报", rendered)
         self.assertIn("📊 分析结果摘要", rendered)
-        self.assertIn("▪️ *600519*", rendered)
-        self.assertIn("信号 强势", rendered)
+        self.assertIn("• 600519：强势", rendered)
         self.assertNotIn("| --- |", rendered)
         self.assertIn("[详情](https://example.com/report)", rendered)
         self.assertNotIn("# 日报", rendered)
