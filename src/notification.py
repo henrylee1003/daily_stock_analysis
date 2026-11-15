@@ -91,6 +91,28 @@ from src.notification_sender import (
 logger = logging.getLogger(__name__)
 
 
+_OPENCC_CONVERTER = None
+
+
+def _to_traditional_chinese(content: str) -> str:
+    """Convert Simplified Chinese to Taiwan Traditional when REPORT_TRADITIONAL_CHINESE=true."""
+    import os
+
+    if not content or os.getenv("REPORT_TRADITIONAL_CHINESE", "").strip().lower() not in ("1", "true", "yes"):
+        return content
+    global _OPENCC_CONVERTER
+    try:
+        if _OPENCC_CONVERTER is None:
+            from opencc import OpenCC
+
+            # s2twp: Simplified -> Traditional (Taiwan) with Taiwan phrasing
+            _OPENCC_CONVERTER = OpenCC("s2twp")
+        return _OPENCC_CONVERTER.convert(content)
+    except Exception as e:  # never block sending because of conversion
+        logger.warning("Traditional Chinese conversion failed, sending original text: %s", e)
+        return content
+
+
 def _safe_float(value: Any) -> Optional[float]:
     """Best-effort float conversion; handles `"3.2%"` and `"1,234"` shapes."""
     if value is None:
@@ -2681,6 +2703,7 @@ class NotificationService(
         Returns:
             Structured dispatch diagnostics.
         """
+        content = _to_traditional_chinese(content)
         context_success = self.send_to_context(content)
         if not self.should_broadcast_static_channels():
             if context_success:
