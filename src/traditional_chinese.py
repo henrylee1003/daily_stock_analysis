@@ -21,7 +21,9 @@ def to_traditional_chinese(content: str) -> str:
 
             # s2twp: Simplified -> Traditional (Taiwan) with Taiwan phrasing
             _OPENCC_CONVERTER = OpenCC("s2twp")
-        return _OPENCC_CONVERTER.convert(content)
+        converted = _OPENCC_CONVERTER.convert(content)
+        # OpenCC maps 复盘 to 覆盤; Taiwan usage is 復盤
+        return converted.replace("覆盤", "復盤")
     except Exception as e:  # never block sending because of conversion
         logger.warning("Traditional Chinese conversion failed, sending original text: %s", e)
         return content

@@ -7,6 +7,7 @@ Telegram 发送提醒服务
 2. 通过 Telegram Bot API 发送 图片消息
 """
 import logging
+import os
 from typing import Optional
 import requests
 import time
@@ -68,6 +69,35 @@ def _markdown_tables_to_lists(text: str) -> str:
             if details:
                 out.append("　" + "｜".join(details))
     return '\n'.join(out)
+
+
+def _telegram_plain_text_enabled() -> bool:
+    """TELEGRAM_PLAIN_TEXT=true sends messages without any Markdown symbols."""
+    return os.getenv("TELEGRAM_PLAIN_TEXT", "").strip().lower() in ("1", "true", "yes")
+
+
+def _markdown_to_plain_text(text: str) -> str:
+    """Strip Markdown syntax so Telegram shows clean text (no #, **, >, tables)."""
+    result = strip_hidden_markdown_metadata(text)
+    result = _markdown_tables_to_lists(result)
+    # Links: [text](url) -> text (url)
+    result = re.sub(r'\[([^\]]+)\]\(([^)]+)\)', r'\1 (\2)', result)
+    # Headings: drop leading #'s
+    result = re.sub(r'^[ \t]*#{1,6}[ \t]*', '', result, flags=re.MULTILINE)
+    # Blockquotes
+    result = re.sub(r'^[ \t]*>[ \t]?', '', result, flags=re.MULTILINE)
+    # Horizontal rules
+    result = re.sub(r'^[ \t]*(-{3,}|\*{3,}|_{3,})[ \t]*$', '──────────', result, flags=re.MULTILINE)
+    # Bold / italic / inline code markers
+    result = re.sub(r'\*\*(.+?)\*\*', r'\1', result)
+    result = re.sub(r'__(.+?)__', r'\1', result)
+    result = re.sub(r'(?<!\w)\*(?!\s)(.+?)(?<!\s)\*(?!\w)', r'\1', result)
+    result = re.sub(r'`([^`]+)`', r'\1', result)
+    # Bullets: "- item" / "* item" -> "• item"
+    result = re.sub(r'^([ \t]*)[-*+][ \t]+', r'\1• ', result, flags=re.MULTILINE)
+    # Collapse 3+ blank lines
+    result = re.sub(r'\n{3,}', '\n\n', result)
+    return result.strip()
 
 
 class TelegramSender:
@@ -194,6 +224,9 @@ class TelegramSender:
             "parse_mode": "Markdown",
             "disable_web_page_preview": True
         }
+        if _telegram_plain_text_enabled():
+            # Plain text: no parse_mode, so nothing can fail to parse
+            payload.pop("parse_mode", None)
 
         if message_thread_id:
             payload['message_thread_id'] = message_thread_id
@@ -446,6 +479,9 @@ class TelegramSender:
         - 使用 *bold* 而非 **bold**
         - 使用 _italic_
         """
+        if _telegram_plain_text_enabled():
+            return _markdown_to_plain_text(text)
+
         result = strip_hidden_markdown_metadata(text)
 
         # 移除 # 标题标记（Telegram 不支持）
