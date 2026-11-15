@@ -14,6 +14,7 @@ import re
 
 from src.config import Config
 from src.formatters import _custom_unit_to_index, strip_hidden_markdown_metadata, utf16_len
+from src.traditional_chinese import to_traditional_chinese
 
 
 logger = logging.getLogger(__name__)
@@ -142,6 +143,8 @@ class TelegramSender:
 
             # Telegram has no table support; render tables as lists instead
             sanitized_content = _markdown_tables_to_lists(sanitized_content)
+            # Every Telegram path (reports, market review, alerts) passes here
+            sanitized_content = to_traditional_chinese(sanitized_content)
 
             telegram_content = self._convert_to_telegram_markdown(sanitized_content)
 
