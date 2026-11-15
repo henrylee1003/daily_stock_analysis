@@ -28,6 +28,7 @@ from src.agent.llm_adapter import (
     register_fallback_model_pricing,
 )
 from src.agent.provider_trace import resolved_model_provider_identity
+from src.manual_holdings import format_holding_prompt_section
 from src.agent.skills.defaults import CORE_TRADING_SKILL_POLICY_EN, CORE_TRADING_SKILL_POLICY_ZH
 from src.config import (
     Config,
@@ -4464,6 +4465,12 @@ Output strictly in the following JSON format. This is a complete Decision Dashbo
             prompt += market_structure_section
         if isinstance(analysis_context_pack_summary, str) and analysis_context_pack_summary:
             prompt += analysis_context_pack_summary
+        # User's own position (PORTFOLIO_HOLDINGS) so advice can target the actual holding
+        prompt += format_holding_prompt_section(
+            context.get("portfolio_context"),
+            (context.get("today") or {}).get("close"),
+            english=english,
+        )
         if english:
             prompt += f"""
 
