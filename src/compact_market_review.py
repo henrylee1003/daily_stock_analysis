@@ -159,7 +159,13 @@ def _compact_section(section: str) -> Optional[str]:
     lines = section.split("\n")
     indices = _index_rows(lines)
     summary = _summary(lines)
+    # Market text is public data (no holdings), safe to log for format debugging
+    logger.info(
+        "[CompactMarket] region=%s indices=%d summary=%s chars=%d",
+        region, len(indices), bool(summary), len(section),
+    )
     if not indices and not summary:
+        logger.info("[CompactMarket] fallback, section head: %s", section[:600].replace("\n", " / "))
         return None
     title = {"tw": "🇹🇼 台股大盘", "us": "🇺🇸 美股大盘"}.get(region or "", "📈 大盘")
     out = [title]
@@ -194,7 +200,9 @@ def compact_market_review(report: str) -> str:
                 compact_parts.append(section.strip())
             else:
                 compact_parts.append(compact)
-        return "\n\n──────────\n\n".join(compact_parts) if compact_parts else report
+        result = "\n\n──────────\n\n".join(compact_parts) if compact_parts else report
+        logger.info("[CompactMarket] %d -> %d chars", len(report or ""), len(result))
+        return result
     except Exception as e:
         logger.warning("Compact market review failed, sending full text: %s", e)
         return report
