@@ -3,7 +3,8 @@ name: 每日股票分析
 on:
   # 定时触发 - 每天北京时间 18:00 (UTC 10:00)
   schedule:
-    - cron: '0 10 * * 1-5'     # 周一到周五，UTC 10:00 = 北京时间 18:00
+    - cron: '30 8 * * 1-5'     # TW: Mon-Fri 16:30 Taipei (after TWSE institutional data is out)
+    - cron: '0 22 * * 1-5'     # US: Mon-Fri 22:00 UTC = 06:00 Taipei next day (after US close)
   
   # 手动触发
   workflow_dispatch:
@@ -17,6 +18,15 @@ on:
           - full          # 完整分析（股票+大盘）
           - market-only   # 仅大盘复盘
           - stocks-only   # 仅股票分析
+      market:
+        description: 'Market scope (all / tw / us)'
+        required: false
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - tw
+          - us
       force_run:
         description: '强制运行（跳过交易日检查）'
         required: false
@@ -468,6 +478,22 @@ jobs:
             export STOCK_LIST="600519"
           fi
 
+          # Market scope: scheduled TW/US runs, or the manual "market" input
+          SCOPE="${{ github.event.inputs.market }}"
+          case "${{ github.event.schedule }}" in
+            "30 8 * * 1-5") SCOPE="tw" ;;
+            "0 22 * * 1-5") SCOPE="us" ;;
+          esac
+          SCOPE="${SCOPE:-all}"
+          if [ "$SCOPE" = "tw" ] || [ "$SCOPE" = "us" ]; then
+            TW_LIST=$(echo "$STOCK_LIST" | tr ',' '\n' | sed 's/ //g' | grep -iE '\.TWO?$' | paste -sd, -)
+            US_LIST=$(echo "$STOCK_LIST" | tr ',' '\n' | sed 's/ //g' | grep -viE '\.TWO?$' | grep -v '^$' | paste -sd, -)
+            if [ "$SCOPE" = "tw" ]; then export STOCK_LIST="$TW_LIST"; else export STOCK_LIST="$US_LIST"; fi
+            export MARKET_REVIEW_REGION="$SCOPE"
+            echo "🌏 Market scope: $SCOPE | stocks: ${STOCK_LIST:-none}"
+            if [ -z "$STOCK_LIST" ]; then SCOPE_MARKET_ONLY=1; fi
+          fi
+
           # 处理 LITELLM YAML 配置文件
           if [ -n "$LITELLM_CONFIG_YAML" ] && [ -n "$LITELLM_CONFIG" ]; then
             echo "📝 使用 GitHub Actions Secrets/Variables 中的 LITELLM_CONFIG_YAML 配置"
@@ -480,6 +506,8 @@ jobs:
 
           # 判断运行模式
           MODE="${{ github.event.inputs.mode || 'full' }}"
+          # No stocks in this market scope: only run the market review
+          if [ "${SCOPE_MARKET_ONLY:-}" = "1" ]; then MODE="market-only"; fi
           
           echo "=========================================="
           echo "🚀 A股自选股智能分析系统"

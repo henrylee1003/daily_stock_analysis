@@ -12,6 +12,7 @@ _OPENCC_CONVERTER = None
 # Mainland investing terms (after OpenCC) -> Taiwan usage. Longer terms first.
 TW_INVESTING_TERMS = (
     ("覆盤", "復盤"),
+    ("臺", "台"),
     ("止損位", "停損價"),
     ("止損", "停損"),
     ("止盈", "停利"),

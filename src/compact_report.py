@@ -97,23 +97,36 @@ def _drop_stop_loss(text: str) -> str:
     return result
 
 
+_ADVICE_PREFIX_RE = re.compile(r"^[^：:]{0,20}(持仓|持股|持有)[^：:]{0,20}[：:]")
+
+
+def _first_sentence(text: str) -> str:
+    """Keep only the first sentence (up to the first 。！？)."""
+    text = str(text or "").strip()
+    match = re.search(r"[。！？!?]", text)
+    return text[: match.end()] if match else text
+
+
+def _short_advice(text: str) -> str:
+    """Drop the "持仓者（成本…）：" prefix, stop-loss clauses, keep the first sentence."""
+    text = _ADVICE_PREFIX_RE.sub("", str(text or "").strip(), count=1)
+    return _first_sentence(_drop_stop_loss(text))
+
+
 def _fmt_num(value: float) -> str:
     return f"{value:,.2f}".rstrip("0").rstrip(".")
 
 
-def _holding_line(code: str, price: Optional[float]) -> Optional[str]:
+def _holding_tag(code: str, price: Optional[float]) -> Optional[str]:
+    """Short P&L tag like "持股 -21.85%" (or "持股" when no price)."""
     holding = get_manual_holding(code)
     if not holding:
         return None
-    qty = holding["quantity"]
-    cost = holding["avg_cost"]
-    line = f"💼 你的持股：{_fmt_num(qty)} 股，成本 {_fmt_num(cost)}"
     price = _finite(price)
+    cost = holding["avg_cost"]
     if price and cost > 0:
-        pct = (price / cost - 1) * 100
-        pnl = (price - cost) * qty
-        line += f"，现价 {_fmt_num(price)}，损益 {pnl:+,.0f}（{pct:+.2f}%）"
-    return line
+        return f"持股 {(price / cost - 1) * 100:+.2f}%"
+    return "持股"
 
 
 def _earnings_lines(notifier: Any, result: Any, blocks: Dict[str, Any]) -> List[str]:
@@ -142,22 +155,33 @@ def _earnings_lines(notifier: Any, result: Any, blocks: Dict[str, Any]) -> List[
     return lines
 
 
+def _fmt_lots(value: Any) -> Optional[str]:
+    shares = _finite(value)
+    if shares is None:
+        return None
+    return f"{shares / 1000:+,.0f} 张"
+
+
 def _flow_line(notifier: Any, blocks: Dict[str, Any]) -> Optional[str]:
+    """Taiwan institutional net buy/sell in lots, e.g. 外资 +10,018 张."""
     if blocks.get("institution_status") != "ok":
         return None
     inst = blocks.get("institution") or {}
-    fmt = notifier._format_net_shares
-    parts = [
-        f"外资 {fmt(inst.get('foreign_net'))}",
-        f"投信 {fmt(inst.get('trust_net'))}",
-        f"自营商 {fmt(inst.get('dealer_net'))}",
-    ]
-    if all("N/A" in p for p in parts):
+    parts = []
+    for label, key in (("外资", "foreign_net"), ("投信", "trust_net"), ("自营商", "dealer_net"), ("合计", "total_net")):
+        lots = _fmt_lots(inst.get(key))
+        if lots:
+            parts.append(f"{label} {lots}")
+    if not parts:
         return None
     raw_date = str(inst.get("date") or "")
-    label = f"{raw_date[4:6]}/{raw_date[6:8]}" if len(raw_date) == 8 and raw_date.isdigit() else raw_date
-    total = fmt(inst.get("total_net"))
-    return f"💰 三大法人（{label}）：" + "｜".join(parts) + f"｜合计 {total}"
+    note = ""
+    if len(raw_date) == 8 and raw_date.isdigit():
+        note = f"（{raw_date[4:6]}/{raw_date[6:8]}"
+        if raw_date != _taipei_today().strftime("%Y%m%d"):
+            note += "，非当日"
+        note += "）"
+    return f"💰 三大法人{note}：" + "｜".join(parts)
 
 
 def generate_compact_report(notifier: Any, results: List[Any], report_date: Optional[str] = None) -> str:
@@ -177,15 +201,15 @@ def generate_compact_report(notifier: Any, results: List[Any], report_date: Opti
         core = dash.get("core_conclusion") or {}
         one = str(core.get("one_sentence") or result.analysis_summary or "").strip()
 
-        lines += ["", "──────────", f"{emoji} {name}（{result.code}）｜{signal_text}｜评分 {result.sentiment_score}"]
+        header = f"{emoji} {name}（{result.code}）｜{signal_text}｜评分 {result.sentiment_score}"
+        tag = _holding_tag(result.code, getattr(result, "current_price", None))
+        if tag:
+            header += f"｜{tag}"
+        lines += ["", header]
         if one:
-            lines.append(f"结论：{_drop_stop_loss(one)}")
-
-        holding = _holding_line(result.code, getattr(result, "current_price", None))
-        if holding:
-            lines.append(holding)
-            advice = (core.get("position_advice") or {}).get("has_position")
-            advice = _drop_stop_loss(advice) if advice else ""
+            lines.append(f"结论：{_first_sentence(_drop_stop_loss(one))}")
+        if tag:
+            advice = _short_advice((core.get("position_advice") or {}).get("has_position") or "")
             if advice:
                 lines.append(f"建议：{advice}")
 
