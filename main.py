@@ -826,6 +826,17 @@ def _market_review_report_text(review_result: Any) -> str:
     return review_result if isinstance(review_result, str) else ""
 
 
+def _maybe_compact_market_report(content: str) -> str:
+    """Shorten the market review when REPORT_COMPACT=true (same as the market_review send path)."""
+    from src.compact_report import compact_report_enabled
+
+    if not compact_report_enabled():
+        return content
+    from src.compact_market_review import compact_market_review
+
+    return compact_market_review(content)
+
+
 def _save_reused_market_review_report(
     notifier: Any,
     market_report: str,
@@ -1191,7 +1202,7 @@ def run_full_analysis(
                     and pipeline.notifier.is_available()
                 ):
                     if pipeline.notifier.send(
-                        f"# 📈 大盘复盘\n\n{market_report}",
+                        _maybe_compact_market_report(f"# 📈 大盘复盘\n\n{market_report}"),
                         email_send_to_all=True,
                         route_type="report",
                     ):
@@ -1276,7 +1287,7 @@ def run_full_analysis(
         if merge_notification and (results or market_report) and not args.no_notify:
             parts = []
             if market_report:
-                parts.append(f"# 📈 大盘复盘\n\n{market_report}")
+                parts.append(_maybe_compact_market_report(f"# 📈 大盘复盘\n\n{market_report}"))
             if results:
                 dashboard_content = pipeline.notifier.generate_aggregate_report(
                     results,
