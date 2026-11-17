@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+- [新增] 台股/美股分开推送（fork 定制）：`REPORT_COMPACT` 手机精简报告（个股结论、持仓建议、近两日财报、台股三大法人与融资融券；大盘只留指数、重点、策略与台股大盘法人），`TELEGRAM_PLAIN_TEXT` 纯文本推送，`REPORT_TRADITIONAL_CHINESE` 台湾繁体与用语，`PORTFOLIO_HOLDINGS` 手动持仓建议，`FINMIND_TOKEN` 可选的 FinMind 筹码数据；每日 Actions 改为台北 16:37（台股）与 06:13（美股）两次排程，延迟过久的排程自动跳过，报告产物默认不上传。
+
 - [修复] Docker 构建与启动入口在 ARM64 架构下默认设置 `OPENBLAS_CORETYPE=ARMV8`（保留用户显式覆盖且不影响 x86_64），修复 Apple Silicon Linux 虚拟机因 OpenBLAS SME 指令分发导致 `Illegal instruction (exit code 132)` 崩溃的问题，并补充部署排障说明。
 
 - [修复] 关闭 LiteLLM 逐 chunk 的 streaming success logging（本项目未注册 LiteLLM callback，用量统计不受影响），修复 Windows 上每个流式 chunk 新建事件循环与回环 socketpair、全局线程池卡在 `accept()`，导致 CLI 打印「程序执行完成」后进程不退出且额外占用大量 CPU 的问题。

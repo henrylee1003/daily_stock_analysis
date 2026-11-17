@@ -32,8 +32,10 @@ _DEALER = ("Dealer_self", "Dealer_Hedging")
 
 
 def tw_stock_id(code: str) -> Optional[str]:
-    """'2303.TW' / '6223.TWO' -> '2303' / '6223'; None for non-Taiwan codes."""
+    """'2303.TW' / '6223.TWO' / 'TW.2303' -> '2303' / '6223' / '2303'; None for non-Taiwan codes."""
     value = str(code or "").strip().upper()
+    if value.startswith("TW.") and value[3:].isdigit():
+        return value[3:]
     for suffix in (".TWO", ".TW"):
         if value.endswith(suffix):
             return value[: -len(suffix)]

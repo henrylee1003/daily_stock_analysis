@@ -35,6 +35,9 @@ _SHORT_INDEX_NAMES = {
     "柜买指数": "柜买",
 }
 _SEPARATOR_MARKERS = ("以下为下一市场", "Next market recap", "다음 시장")
+_MARKET_SPLIT_RE = re.compile(
+    r"\n[ \t]*-{3,}[ \t]*\n(?=\s*>\s*(?:" + "|".join(map(re.escape, _SEPARATOR_MARKERS)) + "))"
+)
 _STRATEGY_KEYS = ("策略结论",)
 _POSITION_KEYS = ("仓位建议", "仓位区间", "建议仓位")
 
@@ -81,10 +84,19 @@ def _index_rows(lines: List[str]) -> List[str]:
 
 
 def _first_matching(lines: List[str], keys) -> Optional[str]:
-    for line in lines:
+    """Value after "key：" on the matching line; a label line without a colon
+    (e.g. a "### 策略结论" heading) takes the next non-empty line instead."""
+    for i, line in enumerate(lines):
         text = _clean(line)
-        if any(k in text for k in keys):
+        if not any(k in text for k in keys):
+            continue
+        if re.search(r"[：:]", text):
             return re.sub(r"^.*?[：:]", "", text, count=1).strip() or None
+        for following in lines[i + 1:]:
+            value = _clean(following)
+            if value:
+                return value
+        return None
     return None
 
 
@@ -207,7 +219,9 @@ def _compact_section(section: str) -> Optional[str]:
 def compact_market_review(report: str) -> str:
     """Return a compact version of the full market review; keep the original on failure."""
     try:
-        sections = re.split(r"\n[ \t]*-{3,}[ \t]*\n", str(report or ""))
+        # Split only between markets (rule followed by the "next market" marker);
+        # "---" rules inside one market's review stay in that section
+        sections = re.split(_MARKET_SPLIT_RE, str(report or ""))
         compact_parts: List[str] = []
         for section in sections:
             if not section.strip():

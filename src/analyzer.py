@@ -4465,12 +4465,15 @@ Output strictly in the following JSON format. This is a complete Decision Dashbo
             prompt += market_structure_section
         if isinstance(analysis_context_pack_summary, str) and analysis_context_pack_summary:
             prompt += analysis_context_pack_summary
-        # User's own position (PORTFOLIO_HOLDINGS) so advice can target the actual holding
-        prompt += format_holding_prompt_section(
-            context.get("portfolio_context"),
-            (context.get("today") or {}).get("close"),
-            english=english,
-        )
+        # User's own position (PORTFOLIO_HOLDINGS) so advice can target the actual holding.
+        # Only for manual holdings: Web/API portfolio analysis keeps upstream behavior.
+        portfolio_context = context.get("portfolio_context")
+        if isinstance(portfolio_context, dict) and portfolio_context.get("cost_method") == "manual":
+            prompt += format_holding_prompt_section(
+                portfolio_context,
+                (context.get("today") or {}).get("close"),
+                english=english,
+            )
         if english:
             prompt += f"""
 

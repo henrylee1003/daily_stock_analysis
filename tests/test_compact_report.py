@@ -166,5 +166,48 @@ class TestMarketFlowsIncomplete(unittest.TestCase):
         cmr._fetch_tw_market_flows_cached.cache_clear()
 
 
+class TestRoundThreeFixes(unittest.TestCase):
+    def test_strategy_heading_without_colon_takes_next_line(self):
+        lines = ["### 策略结论", "", "均衡偏防守"]
+        self.assertEqual(cmr._first_matching(lines, cmr._STRATEGY_KEYS), "均衡偏防守")
+
+    def test_rules_inside_one_market_do_not_break_compaction(self):
+        review = (
+            "# 美股大盘复盘\n\n> 科技股回调。\n\n"
+            "| 指数 | 最新 | 涨跌幅 |\n|---|---|---|\n| 标普500指数 | 7561.67 | -0.40% |\n\n"
+            "---\n\n### 三、讯息催化\n" + "很长的新闻段落。" * 50 + "\n\n---\n\n"
+            "> 以下为下一市场大盘复盘\n\n# 台股大盘复盘\n\n> 加权上涨。\n"
+        )
+        with mock.patch.object(cmr, "fetch_tw_market_flows", return_value=None):
+            out = cmr.compact_market_review(review)
+        self.assertNotIn("很长的新闻段落", out)
+        self.assertIn("🇺🇸 美股大盘", out)
+        self.assertIn("🇹🇼 台股大盘", out)
+
+    def test_market_prefixed_codes(self):
+        import src.finmind_chips as fc
+
+        self.assertEqual(cr._yf_symbol("US.AAPL"), "AAPL")
+        self.assertEqual(cr._yf_symbol("TW.2303"), "2303.TW")
+        self.assertEqual(fc.tw_stock_id("TW.2303"), "2303")
+
+    def test_holding_prompt_only_for_manual_holdings(self):
+        try:
+            import litellm  # noqa: F401
+        except ImportError:
+            from tests.litellm_stub import ensure_litellm_stub
+
+            ensure_litellm_stub()
+        from src.analyzer import GeminiAnalyzer
+
+        with mock.patch.object(GeminiAnalyzer, "_init_litellm", return_value=None):
+            analyzer = GeminiAnalyzer()
+        base = {"code": "2303.TW", "date": "2026-11-17", "today": {"close": 103.0}}
+        manual = dict(base, portfolio_context={"quantity": 600, "avg_cost": 142.25, "cost_method": "manual"})
+        broker = dict(base, portfolio_context={"quantity": 600, "avg_cost": 142.25, "cost_method": "fifo"})
+        self.assertIn("用户实际持仓", analyzer._format_prompt(manual, "联电", news_context=None))
+        self.assertNotIn("用户实际持仓", analyzer._format_prompt(broker, "联电", news_context=None))
+
+
 if __name__ == "__main__":
     unittest.main()

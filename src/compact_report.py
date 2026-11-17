@@ -61,6 +61,10 @@ def _recent_days(today: date) -> set:
 def _yf_symbol(code: str) -> Optional[str]:
     """Yahoo symbol for earnings lookup; None for bare digits (A-share codes in this project)."""
     value = str(code or "").strip().upper()
+    if value.startswith("US."):
+        value = value[3:]
+    elif value.startswith("TW.") and value[3:].isdigit():
+        value = f"{value[3:]}.TW"
     if not value or value.isdigit():
         return None
     return value
