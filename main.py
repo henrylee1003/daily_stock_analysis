@@ -91,6 +91,7 @@ from src.webui_frontend import prepare_webui_frontend_assets
 from src.config import get_config, Config
 from src.logging_config import setup_logging
 from src.brokers.futu.portfolio import FutuPortfolioError
+from src.compact_market_review import maybe_compact_market_report
 from src.core.analysis_run_marker import (
     record_analysis_run_marker,
     should_skip_startup_immediate_run,
@@ -826,13 +827,6 @@ def _market_review_report_text(review_result: Any) -> str:
     return review_result if isinstance(review_result, str) else ""
 
 
-def _maybe_compact_market_report(content: str) -> str:
-    """Shorten the market review when REPORT_COMPACT=true (shared with the market_review send path)."""
-    from src.compact_market_review import maybe_compact_market_report
-
-    return maybe_compact_market_report(content)
-
-
 def _save_reused_market_review_report(
     notifier: Any,
     market_report: str,
@@ -1198,7 +1192,7 @@ def run_full_analysis(
                     and pipeline.notifier.is_available()
                 ):
                     if pipeline.notifier.send(
-                        _maybe_compact_market_report(f"# 📈 大盘复盘\n\n{market_report}"),
+                        maybe_compact_market_report(f"# 📈 大盘复盘\n\n{market_report}"),
                         email_send_to_all=True,
                         route_type="report",
                     ):
@@ -1283,7 +1277,7 @@ def run_full_analysis(
         if merge_notification and (results or market_report) and not args.no_notify:
             parts = []
             if market_report:
-                parts.append(_maybe_compact_market_report(f"# 📈 大盘复盘\n\n{market_report}"))
+                parts.append(maybe_compact_market_report(f"# 📈 大盘复盘\n\n{market_report}"))
             if results:
                 dashboard_content = pipeline.notifier.generate_aggregate_report(
                     results,

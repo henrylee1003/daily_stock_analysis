@@ -7,6 +7,7 @@
 """Optional Simplified -> Taiwan Traditional Chinese conversion for outgoing messages."""
 
 import logging
+import re
 
 from src.env_flags import env_flag
 
@@ -52,6 +53,12 @@ TW_INVESTING_TERMS = (
     ("成交額", "成交金額"),
 )
 
+# Short terms that are also the start of unrelated words (同比例, 倉位置)
+_TERM_GUARDS = {"同比": "(?!例)", "倉位": "(?!置)"}
+_TERM_PATTERNS = tuple(
+    (re.compile(re.escape(src) + _TERM_GUARDS.get(src, "")), dst) for src, dst in TW_INVESTING_TERMS
+)
+
 
 def to_traditional_chinese(content: str) -> str:
     """Convert Simplified Chinese to Taiwan Traditional when REPORT_TRADITIONAL_CHINESE=true."""
@@ -65,8 +72,8 @@ def to_traditional_chinese(content: str) -> str:
             # s2twp: Simplified -> Traditional (Taiwan) with Taiwan phrasing
             _OPENCC_CONVERTER = OpenCC("s2twp")
         converted = _OPENCC_CONVERTER.convert(content)
-        for src_term, tw_term in TW_INVESTING_TERMS:
-            converted = converted.replace(src_term, tw_term)
+        for pattern, tw_term in _TERM_PATTERNS:
+            converted = pattern.sub(tw_term, converted)
         return converted
     except Exception as e:  # never block sending because of conversion
         logger.warning("Traditional Chinese conversion failed, sending original text: %s", e)

@@ -50,12 +50,19 @@ def _clean(line: str) -> str:
 
 
 def _region_of(section: str) -> Optional[str]:
+    """Region from the section title ("美股大盘复盘" / "台股大盘复盘"); otherwise
+    whichever market keyword appears first, so a US intro mentioning Taiwan stays US."""
     head = section[:300]
-    if "台股" in head or "台湾" in head:
+    if "台股大盘" in head:
         return "tw"
-    if "美股" in head:
+    if "美股大盘" in head:
         return "us"
-    return None
+    positions = {
+        "tw": min((head.find(k) for k in ("台股", "台湾") if k in head), default=-1),
+        "us": head.find("美股"),
+    }
+    found = {region: pos for region, pos in positions.items() if pos >= 0}
+    return min(found, key=found.get) if found else None
 
 
 def _index_rows(lines: List[str]) -> List[str]:
@@ -113,7 +120,10 @@ def _summary(lines: List[str]) -> Optional[str]:
 def fetch_tw_market_flows(today: Optional[date] = None, max_back_days: int = 5) -> Optional[Dict[str, object]]:
     """Fetch TWSE market-wide institutional net buy/sell (NT$) for the latest day with data."""
     # Cached per day: the market review can be compacted more than once per run
-    return _fetch_tw_market_flows_cached(today or cr._taipei_today(), max_back_days)
+    try:
+        return _fetch_tw_market_flows_cached(today or cr._taipei_today(), max_back_days)
+    except cr._LookupFailed:
+        return None
 
 
 @lru_cache(maxsize=8)
@@ -160,9 +170,10 @@ def _fetch_tw_market_flows_cached(today: date, max_back_days: int) -> Optional[D
         # Renamed or missing rows must not be pushed as real zeros
         if matched != set(net):
             logger.warning("TWSE BFI82U rows incomplete for %s (matched=%s)", day, sorted(matched))
-            return None
+            continue  # try the previous trading day (shown with its own date)
         return {"date": day.isoformat(), **net}
-    return None
+    # Nothing found: raise so the miss is not cached and a later call retries
+    raise cr._LookupFailed(today)
 
 
 def _fmt_yi(value: object) -> Optional[str]:

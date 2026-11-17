@@ -33,12 +33,13 @@ _DEALER = ("Dealer_self", "Dealer_Hedging")
 
 def tw_stock_id(code: str) -> Optional[str]:
     """'2303.TW' / '6223.TWO' / 'TW.2303' -> '2303' / '6223' / '2303'; None for non-Taiwan codes."""
+    from src.services.market_symbol_utils import is_tw_suffix_symbol, split_suffix_symbol
+
     value = str(code or "").strip().upper()
     if value.startswith("TW.") and value[3:].isdigit():
         return value[3:]
-    for suffix in (".TWO", ".TW"):
-        if value.endswith(suffix):
-            return value[: -len(suffix)]
+    if is_tw_suffix_symbol(value):
+        return split_suffix_symbol(value)[0]
     return None
 
 
@@ -60,10 +61,21 @@ def _fetch(dataset: str, stock_id: str, start: date) -> List[Dict[str, Any]]:
 
 
 def _institutional(rows: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
-    """Net buy/sell in shares for the latest date; None when no known investor row matched."""
-    if not rows:
-        return None
-    latest = max(str(r.get("date") or "") for r in rows)
+    """Net buy/sell in shares for the newest date with complete rows.
+
+    A partially published latest day falls back to the previous complete day
+    (shown with its own date); None when no day is complete.
+    """
+    for day in sorted({str(r.get("date") or "") for r in rows}, reverse=True):
+        if not day:
+            continue
+        result = _institutional_for_day(rows, day)
+        if result:
+            return result
+    return None
+
+
+def _institutional_for_day(rows: List[Dict[str, Any]], latest: str) -> Optional[Dict[str, Any]]:
     net = {"foreign": 0.0, "trust": 0.0, "dealer": 0.0, "foreign_dealer": 0.0}
     matched = set()
     for row in rows:
@@ -121,6 +133,10 @@ def _margin(rows: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     }
 
 
+class _NothingFetched(Exception):
+    """Raised inside the cached function so lru_cache does not keep a failed lookup."""
+
+
 @lru_cache(maxsize=64)
 def _get_tw_chips_cached(stock_id: str, day: date) -> Dict[str, Any]:
     start = day - timedelta(days=10)
@@ -135,6 +151,8 @@ def _get_tw_chips_cached(stock_id: str, day: date) -> Dict[str, Any]:
         result["margin"] = _margin(_fetch("TaiwanStockMarginPurchaseShortSale", stock_id, start))
     except Exception as e:
         logger.warning("FinMind margin fetch failed for %s: %s", stock_id, e)
+    if result["institutional"] is None and result["margin"] is None:
+        raise _NothingFetched(stock_id)
     return result
 
 
@@ -143,5 +161,9 @@ def get_tw_chips(code: str, today: Optional[date] = None) -> Optional[Dict[str, 
     stock_id = tw_stock_id(code)
     if not stock_id:
         return None
-    # Copy so callers cannot mutate the cached dict
-    return dict(_get_tw_chips_cached(stock_id, today or date.today()))
+    try:
+        # Copy so callers cannot mutate the cached dict
+        return dict(_get_tw_chips_cached(stock_id, today or date.today()))
+    except _NothingFetched:
+        # Not cached: a later report in the same process retries
+        return {"institutional": None, "margin": None}

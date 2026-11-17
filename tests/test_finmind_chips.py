@@ -42,6 +42,22 @@ class TestFinMindParsing(unittest.TestCase):
         rows = [r for r in _inst_rows() if r["name"] != "Investment_Trust"]
         self.assertIsNone(fc._institutional(rows))
 
+    def test_partial_latest_day_falls_back_to_previous_complete_day(self):
+        previous = [dict(r, date="2026-11-16") for r in _inst_rows() if r["date"] == "2026-11-17"]
+        partial_today = [r for r in _inst_rows() if r["date"] == "2026-11-17" and r["name"] == "Foreign_Investor"]
+        inst = fc._institutional(previous + partial_today)
+        self.assertEqual(inst["date"], "2026-11-16")
+
+    def test_total_failure_is_not_cached(self):
+        fc._get_tw_chips_cached.cache_clear()
+        with mock.patch.object(fc, "_fetch", side_effect=RuntimeError("429")) as fetch:
+            fc.get_tw_chips("2303.TW", today=date(2026, 11, 19))
+            fc.get_tw_chips("2303.TW", today=date(2026, 11, 19))
+        self.assertEqual(fetch.call_count, 4)  # 2 datasets x 2 attempts
+
+    def test_lowercase_suffix(self):
+        self.assertEqual(fc.tw_stock_id("6223.two"), "6223")
+
     def test_margin_change(self):
         rows = [{
             "date": "2026-11-17", "MarginPurchaseTodayBalance": 728, "MarginPurchaseYesterdayBalance": 779,
@@ -57,7 +73,7 @@ class TestFinMindParsing(unittest.TestCase):
 
     def test_get_tw_chips_caches_per_stock_and_day(self):
         fc._get_tw_chips_cached.cache_clear()
-        with mock.patch.object(fc, "_fetch", return_value=[]) as fetch:
+        with mock.patch.object(fc, "_fetch", return_value=_inst_rows()) as fetch:
             fc.get_tw_chips("6223.TWO", today=date(2026, 11, 17))
             fc.get_tw_chips("6223.TWO", today=date(2026, 11, 17))
         self.assertEqual(fetch.call_count, 2)  # one call per dataset, second lookup cached

@@ -84,7 +84,15 @@ def fetch_recent_earnings(code: str, today: Optional[date] = None) -> Optional[D
     if not symbol:
         return None
     # The report is built several times per run; cache per (symbol, day)
-    return _fetch_recent_earnings_cached(symbol, today or _taipei_today())
+    try:
+        return _fetch_recent_earnings_cached(symbol, today or _taipei_today())
+    except _LookupFailed:
+        # Failures are not cached, so a later report in the same process retries
+        return None
+
+
+class _LookupFailed(Exception):
+    """Raised inside cached lookups so lru_cache does not keep a failure."""
 
 
 @lru_cache(maxsize=64)
@@ -95,7 +103,7 @@ def _fetch_recent_earnings_cached(symbol: str, today: date) -> Optional[Dict[str
         frame = yf.Ticker(symbol).get_earnings_dates(limit=6)
     except Exception as e:
         logger.info("Earnings date lookup failed for %s: %s", symbol, e)
-        return None
+        raise _LookupFailed(symbol) from e
     if frame is None or getattr(frame, "empty", True):
         return None
     allowed = _recent_days(today)
@@ -124,7 +132,8 @@ def _drop_stop_loss(text: str) -> str:
     return result
 
 
-_ADVICE_PREFIX_RE = re.compile(r"^[^：:]{0,20}(持仓|持股|持有)[^：:]{0,20}[：:]")
+# Only the "持仓者（成本…）：" / "持仓者建议：" style label, never real advice text
+_ADVICE_PREFIX_RE = re.compile(r"^(持仓者|持股者|持有者)(（[^）]{0,30}）|\([^)]{0,30}\))?(建议)?[：:]")
 
 
 def _first_sentence(text: str) -> str:

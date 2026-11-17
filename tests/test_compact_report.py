@@ -209,5 +209,32 @@ class TestRoundThreeFixes(unittest.TestCase):
         self.assertNotIn("用户实际持仓", analyzer._format_prompt(broker, "联电", news_context=None))
 
 
+class TestRoundFourFixes(unittest.TestCase):
+    def test_advice_prefix_only_strips_label(self):
+        self.assertEqual(cr._short_advice("继续持有，目标价：155元；跌破140止损"), "继续持有，目标价：155元")
+        self.assertEqual(cr._short_advice("持仓者建议：续抱观察。"), "续抱观察。")
+
+    def test_failed_earnings_lookup_is_not_cached(self):
+        cr._fetch_recent_earnings_cached.cache_clear()
+        fake_yf = mock.MagicMock()
+        fake_yf.Ticker.return_value.get_earnings_dates.side_effect = RuntimeError("429")
+        with mock.patch.dict("sys.modules", {"yfinance": fake_yf}):
+            self.assertIsNone(cr.fetch_recent_earnings("MU", today=date(2026, 11, 17)))
+            self.assertIsNone(cr.fetch_recent_earnings("MU", today=date(2026, 11, 17)))
+        self.assertEqual(fake_yf.Ticker.call_count, 2)  # retried, not cached
+
+    def test_us_section_mentioning_taiwan_stays_us(self):
+        self.assertEqual(cmr._region_of("> 美股科技股下跌，拖累台股ADR。"), "us")
+        self.assertEqual(cmr._region_of("# 台股大盘复盘\n> 受美股影响"), "tw")
+
+    def test_term_map_does_not_break_other_words(self):
+        with mock.patch.dict(os.environ, {"REPORT_TRADITIONAL_CHINESE": "true"}):
+            from src.traditional_chinese import to_traditional_chinese
+
+            out = to_traditional_chinese("建议同比例减仓，营收同比增长")
+        self.assertIn("同比例", out)
+        self.assertIn("營收年增率", out)
+
+
 if __name__ == "__main__":
     unittest.main()
