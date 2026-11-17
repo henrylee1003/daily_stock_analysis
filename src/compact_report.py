@@ -15,22 +15,25 @@ from __future__ import annotations
 
 import logging
 import math
-import os
 import re
 from datetime import date, datetime, timedelta
+from functools import lru_cache
 from typing import Any, Dict, List, Optional
 
+from src.env_flags import env_flag
 from src.finmind_chips import get_tw_chips
 from src.manual_holdings import get_manual_holding
 
 logger = logging.getLogger(__name__)
 
 _STOP_LOSS_RE = re.compile(r"止损|停损|止損|停損")
-_CLAUSE_SPLIT_RE = re.compile(r"(?<=[，,；;。])")
+# Split after clause punctuation; an ASCII comma followed by a digit is a
+# thousands separator (e.g. 5,100) and must not split the number
+_CLAUSE_SPLIT_RE = re.compile(r"(?<=[，；;。])|(?<=,)(?!\d)")
 
 
 def compact_report_enabled() -> bool:
-    return os.getenv("REPORT_COMPACT", "").strip().lower() in ("1", "true", "yes")
+    return env_flag("REPORT_COMPACT")
 
 
 def _taipei_today() -> date:
@@ -50,10 +53,11 @@ def _recent_days(today: date) -> set:
     return {today, prev}
 
 
-def _yf_symbol(code: str) -> str:
+def _yf_symbol(code: str) -> Optional[str]:
+    """Yahoo symbol for earnings lookup; None for bare digits (A-share codes in this project)."""
     value = str(code or "").strip().upper()
-    if value.isdigit():
-        return f"{value}.TW"
+    if not value or value.isdigit():
+        return None
     return value
 
 
@@ -67,13 +71,21 @@ def _finite(value: Any) -> Optional[float]:
 
 def fetch_recent_earnings(code: str, today: Optional[date] = None) -> Optional[Dict[str, Any]]:
     """Return the earnings release if it was published today or the previous weekday."""
-    today = today or _taipei_today()
+    symbol = _yf_symbol(code)
+    if not symbol:
+        return None
+    # The report is built several times per run; cache per (symbol, day)
+    return _fetch_recent_earnings_cached(symbol, today or _taipei_today())
+
+
+@lru_cache(maxsize=64)
+def _fetch_recent_earnings_cached(symbol: str, today: date) -> Optional[Dict[str, Any]]:
     try:
         import yfinance as yf
 
-        frame = yf.Ticker(_yf_symbol(code)).get_earnings_dates(limit=6)
+        frame = yf.Ticker(symbol).get_earnings_dates(limit=6)
     except Exception as e:
-        logger.info("Earnings date lookup failed for %s: %s", code, e)
+        logger.info("Earnings date lookup failed for %s: %s", symbol, e)
         return None
     if frame is None or getattr(frame, "empty", True):
         return None
@@ -223,14 +235,22 @@ def _flow_line(chips: Optional[Dict[str, Any]], blocks: Dict[str, Any]) -> Optio
         return None
     # max() keeps the first on ties, so the official TWSE block wins a same-day tie
     flows = max(candidates, key=lambda f: f["date"])
+    return format_flow_line(flows, _fmt_lots)
+
+
+_FLOW_LABELS = (("外资", "foreign"), ("投信", "trust"), ("自营商", "dealer"), ("合计", "total"))
+
+
+def format_flow_line(flows: Dict[str, Any], fmt) -> Optional[str]:
+    """Shared "💰 三大法人（MM/DD）：外资 …｜投信 …｜自营商 …｜合计 …" line (stocks and market)."""
     parts = []
-    for label, key in (("外资", "foreign"), ("投信", "trust"), ("自营商", "dealer"), ("合计", "total")):
-        lots = _fmt_lots(flows.get(key))
-        if lots:
-            parts.append(f"{label} {lots}")
+    for label, key in _FLOW_LABELS:
+        text = fmt(flows.get(key))
+        if text:
+            parts.append(f"{label} {text}")
     if not parts:
         return None
-    return f"💰 三大法人{_date_note(flows['date'])}：" + "｜".join(parts)
+    return f"💰 三大法人{_date_note(flows.get('date'))}：" + "｜".join(parts)
 
 
 def _margin_line(chips: Optional[Dict[str, Any]]) -> Optional[str]:

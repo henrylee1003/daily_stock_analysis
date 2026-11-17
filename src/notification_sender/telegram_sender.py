@@ -7,7 +7,6 @@ Telegram 发送提醒服务
 2. 通过 Telegram Bot API 发送 图片消息
 """
 import logging
-import os
 from typing import Optional
 import requests
 import time
@@ -15,6 +14,7 @@ import re
 
 from src.config import Config
 from src.formatters import _custom_unit_to_index, strip_hidden_markdown_metadata, utf16_len
+from src.env_flags import env_flag
 from src.traditional_chinese import to_traditional_chinese
 
 
@@ -84,7 +84,7 @@ def _markdown_tables_to_lists(text: str) -> str:
 
 def _telegram_plain_text_enabled() -> bool:
     """TELEGRAM_PLAIN_TEXT=true sends messages without any Markdown symbols."""
-    return os.getenv("TELEGRAM_PLAIN_TEXT", "").strip().lower() in ("1", "true", "yes")
+    return env_flag("TELEGRAM_PLAIN_TEXT")
 
 
 def _markdown_to_plain_text(text: str) -> str:

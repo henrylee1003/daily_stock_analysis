@@ -369,12 +369,9 @@ def run_market_review(
                     wrapper_title=review_text["push_title"],
                 )
                 # REPORT_COMPACT=true: send a few lines per market instead of the full review
-                from src.compact_report import compact_report_enabled
+                from src.compact_market_review import maybe_compact_market_report
 
-                if compact_report_enabled():
-                    from src.compact_market_review import compact_market_review
-
-                    report_content = compact_market_review(report_content)
+                report_content = maybe_compact_market_report(report_content)
 
                 send_kwargs: Dict[str, Any] = {
                     "email_send_to_all": True,

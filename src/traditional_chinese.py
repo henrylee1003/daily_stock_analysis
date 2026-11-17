@@ -7,7 +7,8 @@
 """Optional Simplified -> Taiwan Traditional Chinese conversion for outgoing messages."""
 
 import logging
-import os
+
+from src.env_flags import env_flag
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +55,7 @@ TW_INVESTING_TERMS = (
 
 def to_traditional_chinese(content: str) -> str:
     """Convert Simplified Chinese to Taiwan Traditional when REPORT_TRADITIONAL_CHINESE=true."""
-    if not content or os.getenv("REPORT_TRADITIONAL_CHINESE", "").strip().lower() not in ("1", "true", "yes"):
+    if not content or not env_flag("REPORT_TRADITIONAL_CHINESE"):
         return content
     global _OPENCC_CONVERTER
     try:

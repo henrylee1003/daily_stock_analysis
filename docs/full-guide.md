@@ -119,6 +119,11 @@ daily_stock_analysis/
 | `REPORT_TYPE` | 报告类型：`simple`(精简)、`full`(完整)、`brief`(3-5句概括)，Docker环境推荐设为 `full` | 可选 |
 | `REPORT_LANGUAGE` | 报告与 Agent Chat 的默认输出语言：`zh`(默认中文) / `en`(英文) / `ko`(韩文)；会同步影响 Prompt、模板、通知 fallback、Web 报告页固定文案，以及未显式传入 `context.report_language` 的问股回复。`ko` 复用英文结构骨架并通过输出语言指令约束模型用韩文输出，通知按报告语言渲染本地化标签。仓库自带 `00-daily-analysis.yml` 已显式映射该变量，直接在 Actions Secrets/Variables 中配置即可生效 | 可选 |
 | `REPORT_SUMMARY_ONLY` | 仅分析结果摘要：设为 `true` 时只推送汇总，不含个股详情；多股时适合快速浏览（默认 false，Issue #262） | 可选 |
+| `REPORT_COMPACT` | 手机精简报告：个股只留结论/持仓/建议/近两日财报/台股筹码，大盘只留指数/重点/策略（默认 false） | 可选 |
+| `TELEGRAM_PLAIN_TEXT` | Telegram 以纯文本发送，去掉 #、**、> 与表格符号（默认 false） | 可选 |
+| `REPORT_TRADITIONAL_CHINESE` | 发送前转为台湾繁体中文并换成台湾投资用语，需 `opencc-python-reimplemented`（默认 false） | 可选 |
+| `PORTFOLIO_HOLDINGS` | 手动持仓 `代码:股数:成本均价`，逗号分隔，供 AI 针对持仓给建议；建议放 Secret | 可选 |
+| `FINMIND_TOKEN` | FinMind 台股筹码（三大法人、融资融券，含上柜）；不填也可用，填了配额较高 | 可选 |
 | `REPORT_SHOW_LLM_MODEL` | 通知报告底部是否显示本次分析使用的 LLM 模型名称，默认 `true`；设为 `false` 可隐藏运行时模型信息。该变量仅调整展示，不影响 provider/model/Base URL、LiteLLM 路由或运行时模型保存/迁移/清理语义。 | 可选 |
 | `REPORT_TEMPLATES_DIR` | Jinja2 模板目录（相对项目根，默认 `templates`） | 可选 |
 | `REPORT_RENDERER_ENABLED` | 启用 Jinja2 模板渲染（默认 `false`，保证零回归） | 可选 |

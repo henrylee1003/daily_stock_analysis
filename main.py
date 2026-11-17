@@ -827,14 +827,10 @@ def _market_review_report_text(review_result: Any) -> str:
 
 
 def _maybe_compact_market_report(content: str) -> str:
-    """Shorten the market review when REPORT_COMPACT=true (same as the market_review send path)."""
-    from src.compact_report import compact_report_enabled
+    """Shorten the market review when REPORT_COMPACT=true (shared with the market_review send path)."""
+    from src.compact_market_review import maybe_compact_market_report
 
-    if not compact_report_enabled():
-        return content
-    from src.compact_market_review import compact_market_review
-
-    return compact_market_review(content)
+    return maybe_compact_market_report(content)
 
 
 def _save_reused_market_review_report(

@@ -16,7 +16,10 @@ from __future__ import annotations
 import logging
 import re
 from datetime import date, timedelta
+from functools import lru_cache
 from typing import Dict, List, Optional
+
+from src import compact_report as cr
 
 logger = logging.getLogger(__name__)
 
@@ -95,19 +98,16 @@ def _summary(lines: List[str]) -> Optional[str]:
     return None
 
 
-def _taipei_today() -> date:
-    from src.compact_report import _taipei_today as today
-
-    return today()
-
-
 def fetch_tw_market_flows(today: Optional[date] = None, max_back_days: int = 5) -> Optional[Dict[str, object]]:
     """Fetch TWSE market-wide institutional net buy/sell (NT$) for the latest day with data."""
-    try:
-        import requests
-    except Exception:
-        return None
-    today = today or _taipei_today()
+    # Cached per day: the market review can be compacted more than once per run
+    return _fetch_tw_market_flows_cached(today or cr._taipei_today(), max_back_days)
+
+
+@lru_cache(maxsize=8)
+def _fetch_tw_market_flows_cached(today: date, max_back_days: int) -> Optional[Dict[str, object]]:
+    import requests
+
     for back in range(max_back_days + 1):
         day = today - timedelta(days=back)
         if day.weekday() >= 5:
@@ -117,9 +117,11 @@ def fetch_tw_market_flows(today: Optional[date] = None, max_back_days: int = 5) 
             f"?response=json&type=day&dayDate={day.strftime('%Y%m%d')}"
         )
         try:
-            payload = requests.get(url, timeout=10).json()
+            resp = requests.get(url, timeout=10)
+            resp.raise_for_status()
+            payload = resp.json()
         except Exception as e:
-            logger.info("TWSE BFI82U fetch failed for %s: %s", day, e)
+            logger.warning("TWSE BFI82U fetch failed for %s: %s", day, e)
             continue
         if payload.get("stat") != "OK" or not payload.get("data"):
             continue
@@ -129,7 +131,8 @@ def fetch_tw_market_flows(today: Optional[date] = None, max_back_days: int = 5) 
                 name, diff = row[0], float(str(row[3]).replace(",", ""))
             except (IndexError, ValueError):
                 continue
-            if name.startswith("外資"):
+            # Same 外资 definition as the per-stock line: exclude 外資自營商 (still in 合計)
+            if name.startswith("外資及陸資"):
                 net["foreign"] += diff
             elif name.startswith("投信"):
                 net["trust"] += diff
@@ -137,26 +140,29 @@ def fetch_tw_market_flows(today: Optional[date] = None, max_back_days: int = 5) 
                 net["dealer"] += diff
             elif name.startswith("合計"):
                 net["total"] = diff
-        return {"date": day, **net}
+        return {"date": day.isoformat(), **net}
     return None
+
+
+def _fmt_yi(value: object) -> Optional[str]:
+    """NT$ -> 亿 with sign, e.g. +288.4 亿."""
+    try:
+        return f"{float(value) / 1e8:+,.1f} 亿"
+    except (TypeError, ValueError):
+        return None
 
 
 def _tw_flow_line(flows: Optional[Dict[str, object]]) -> Optional[str]:
     if not flows:
         return None
-    day = flows["date"]
-    note = f"（{day.strftime('%m/%d')}"
-    if day != _taipei_today():
-        note += "，非当日"
-    note += "）"
+    return cr.format_flow_line(flows, _fmt_yi)
 
-    def yi(value: float) -> str:
-        return f"{value / 1e8:+,.1f} 亿"
 
-    return (
-        f"💰 三大法人{note}：外资 {yi(flows['foreign'])}｜投信 {yi(flows['trust'])}"
-        f"｜自营商 {yi(flows['dealer'])}｜合计 {yi(flows['total'])}"
-    )
+def maybe_compact_market_report(content: str) -> str:
+    """Single entry for every market-review send path: compact only when REPORT_COMPACT=true."""
+    if not cr.compact_report_enabled():
+        return content
+    return compact_market_review(content)
 
 
 def _compact_section(section: str) -> Optional[str]:

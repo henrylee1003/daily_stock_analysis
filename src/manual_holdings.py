@@ -57,7 +57,8 @@ def parse_manual_holdings(raw: Optional[str]) -> Dict[str, Dict[str, Any]]:
         except ValueError:
             logger.warning("PORTFOLIO_HOLDINGS entry skipped (bad number): %s", symbol)
             continue
-        if not (math.isfinite(quantity) and math.isfinite(avg_cost)):
+        # Sold-out (0 shares) or invalid entries are not positions
+        if not (math.isfinite(quantity) and math.isfinite(avg_cost)) or quantity <= 0 or avg_cost <= 0:
             continue
         holdings[_normalize(symbol)] = {
             "symbol": symbol.upper(),
@@ -119,13 +120,13 @@ def format_holding_prompt_section(
             f"- Average cost: {_fmt(avg_cost)}\n"
             f"{pnl_line}"
             "- Requirement: the user already holds this stock. Give concrete advice for THIS position "
-            "(hold / add / trim / stop-loss level), referencing the average cost.\n"
+            "(hold / add / trim), referencing the average cost. Do not mention stop-loss levels.\n"
         )
     return (
         "\n## 💼 用户实际持仓（已持有）\n"
         f"- 持有股数：{_fmt(quantity)}\n"
         f"- 成本均价：{_fmt(avg_cost)}\n"
         f"{pnl_line}"
-        "- 要求：用户已经持有这档股票。请针对“这笔持仓”给出具体建议（续抱／加码／减码／停损价位），"
-        "并以成本均价为参考说明理由。\n"
+        "- 要求：用户已经持有这档股票。请针对“这笔持仓”给出具体建议（续抱／加码／减码），"
+        "并以成本均价为参考说明理由；用户不需要停损建议，不要提停损价位。\n"
     )
