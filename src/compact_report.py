@@ -15,6 +15,7 @@ import re
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional
 
+from src.finmind_chips import get_tw_chips
 from src.manual_holdings import get_manual_holding
 
 logger = logging.getLogger(__name__)
@@ -162,6 +163,40 @@ def _fmt_lots(value: Any) -> Optional[str]:
     return f"{shares / 1000:+,.0f} 张"
 
 
+def _date_note(iso_date: str) -> str:
+    """'2026-11-17' -> '（11/17）', adding '，非当日' when it is not today (Taipei)."""
+    if len(iso_date) != 10:
+        return ""
+    note = f"（{iso_date[5:7]}/{iso_date[8:10]}"
+    if iso_date != _taipei_today().isoformat():
+        note += "，非当日"
+    return note + "）"
+
+
+def _finmind_flow_line(chips: Optional[Dict[str, Any]]) -> Optional[str]:
+    """Institutional flows from FinMind (covers TWSE and TPEx stocks), in lots."""
+    inst = (chips or {}).get("institutional")
+    if not inst:
+        return None
+    parts = [
+        f"{label} {_fmt_lots(inst[key])}"
+        for label, key in (("外资", "foreign"), ("投信", "trust"), ("自营商", "dealer"), ("合计", "total"))
+    ]
+    return f"💰 三大法人{_date_note(inst['date'])}：" + "｜".join(parts)
+
+
+def _margin_line(chips: Optional[Dict[str, Any]]) -> Optional[str]:
+    """Margin purchase / short sale balance in lots with daily change."""
+    margin = (chips or {}).get("margin")
+    if not margin:
+        return None
+    return (
+        f"📒 融资融券{_date_note(margin['date'])}："
+        f"融资 {margin['margin']:,} 张（{margin['margin_change']:+,}）｜"
+        f"融券 {margin['short']:,} 张（{margin['short_change']:+,}）"
+    )
+
+
 def _flow_line(notifier: Any, blocks: Dict[str, Any]) -> Optional[str]:
     """Taiwan institutional net buy/sell in lots, e.g. 外资 +10,018 张."""
     if blocks.get("institution_status") != "ok":
@@ -215,9 +250,13 @@ def generate_compact_report(notifier: Any, results: List[Any], report_date: Opti
 
         blocks = notifier._get_fundamental_blocks(result)
         lines += _earnings_lines(notifier, result, blocks)
-        flow = _flow_line(notifier, blocks)
+        chips = get_tw_chips(result.code, today=_taipei_today())
+        flow = _finmind_flow_line(chips) or _flow_line(notifier, blocks)
         if flow:
             lines.append(flow)
+        margin = _margin_line(chips)
+        if margin:
+            lines.append(margin)
 
     lines += ["", f"产生时间：{datetime.now().strftime('%Y-%m-%d %H:%M')}"]
     models = notifier._collect_models_used(results)
