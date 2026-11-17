@@ -20,6 +20,7 @@ from functools import lru_cache
 from typing import Dict, List, Optional
 
 from src import compact_report as cr
+from src.lookup_backoff import failed_recently, mark_failed
 
 logger = logging.getLogger(__name__)
 
@@ -71,11 +72,13 @@ def _index_rows(lines: List[str]) -> List[str]:
     for line in lines:
         stripped = line.strip()
         if not stripped.startswith("|"):
-            header = None if rows else header
+            if rows:
+                break  # first usable index table is done
+            header = None  # a table without 最新/涨跌幅 must not latch its header
             continue
         cells = [c.strip() for c in stripped.strip("|").split("|")]
         if header is None:
-            if cells and ("指数" in cells[0] or cells[0].lower() == "index"):
+            if cells and "指数" in cells[0] and "最新" in cells and "涨跌幅" in cells:
                 header = cells
             continue
         if all(set(c) <= set("-: ") for c in cells):
@@ -120,9 +123,14 @@ def _summary(lines: List[str]) -> Optional[str]:
 def fetch_tw_market_flows(today: Optional[date] = None, max_back_days: int = 5) -> Optional[Dict[str, object]]:
     """Fetch TWSE market-wide institutional net buy/sell (NT$) for the latest day with data."""
     # Cached per day: the market review can be compacted more than once per run
+    day = today or cr._taipei_today()
+    key = ("twse_bfi82u", day, max_back_days)
+    if failed_recently(key):
+        return None
     try:
-        return _fetch_tw_market_flows_cached(today or cr._taipei_today(), max_back_days)
+        return _fetch_tw_market_flows_cached(day, max_back_days)
     except cr._LookupFailed:
+        mark_failed(key)
         return None
 
 

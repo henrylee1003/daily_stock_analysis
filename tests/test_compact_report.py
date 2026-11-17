@@ -188,7 +188,7 @@ class TestRoundThreeFixes(unittest.TestCase):
         import src.finmind_chips as fc
 
         self.assertEqual(cr._yf_symbol("US.AAPL"), "AAPL")
-        self.assertEqual(cr._yf_symbol("TW.2303"), "2303.TW")
+        self.assertIsNone(cr._yf_symbol("TW.2303"))  # 上市/上櫃 unknown, not guessed
         self.assertEqual(fc.tw_stock_id("TW.2303"), "2303")
 
     def test_holding_prompt_only_for_manual_holdings(self):
@@ -214,14 +214,18 @@ class TestRoundFourFixes(unittest.TestCase):
         self.assertEqual(cr._short_advice("继续持有，目标价：155元；跌破140止损"), "继续持有，目标价：155元")
         self.assertEqual(cr._short_advice("持仓者建议：续抱观察。"), "续抱观察。")
 
-    def test_failed_earnings_lookup_is_not_cached(self):
+    def test_failed_earnings_lookup_is_not_cached_for_the_day(self):
+        from src import lookup_backoff
+
+        lookup_backoff.clear()
         cr._fetch_recent_earnings_cached.cache_clear()
         fake_yf = mock.MagicMock()
         fake_yf.Ticker.return_value.get_earnings_dates.side_effect = RuntimeError("429")
-        with mock.patch.dict("sys.modules", {"yfinance": fake_yf}):
+        with mock.patch.dict("sys.modules", {"yfinance": fake_yf}), \
+                mock.patch.object(lookup_backoff, "FAILURE_TTL_SECONDS", 0):
             self.assertIsNone(cr.fetch_recent_earnings("MU", today=date(2026, 11, 17)))
             self.assertIsNone(cr.fetch_recent_earnings("MU", today=date(2026, 11, 17)))
-        self.assertEqual(fake_yf.Ticker.call_count, 2)  # retried, not cached
+        self.assertEqual(fake_yf.Ticker.call_count, 2)  # retried once the short window passed
 
     def test_us_section_mentioning_taiwan_stays_us(self):
         self.assertEqual(cmr._region_of("> 美股科技股下跌，拖累台股ADR。"), "us")
@@ -233,7 +237,60 @@ class TestRoundFourFixes(unittest.TestCase):
 
             out = to_traditional_chinese("建议同比例减仓，营收同比增长")
         self.assertIn("同比例", out)
-        self.assertIn("營收年增率", out)
+        self.assertIn("營收年增", out)
+
+
+class TestRoundFiveFixes(unittest.TestCase):
+    def setUp(self):
+        from src import lookup_backoff
+
+        lookup_backoff.clear()
+
+    def test_term_map_on_common_phrases(self):
+        cases = {
+            "净利润同比增长20%": "淨利潤年增20%",
+            "营收同比 13%": "營收年增率 13%",
+            "净利同比下降5%": "淨利年減5%",
+            "建议增加仓位": "建議增加持股比重",
+            "加重仓位": "加重持股比重",
+            "持仓者建议加仓": "持股者建議加碼",
+        }
+        with mock.patch.dict(os.environ, {"REPORT_TRADITIONAL_CHINESE": "true"}):
+            from src.traditional_chinese import to_traditional_chinese
+
+            for src_text, expected in cases.items():
+                self.assertEqual(to_traditional_chinese(src_text), expected, src_text)
+
+    def test_failure_is_skipped_briefly_then_retried(self):
+        from src import lookup_backoff
+
+        cr._fetch_recent_earnings_cached.cache_clear()
+        fake_yf = mock.MagicMock()
+        fake_yf.Ticker.return_value.get_earnings_dates.side_effect = RuntimeError("timeout")
+        with mock.patch.dict("sys.modules", {"yfinance": fake_yf}):
+            cr.fetch_recent_earnings("MU", today=date(2026, 11, 20))
+            cr.fetch_recent_earnings("MU", today=date(2026, 11, 20))
+            self.assertEqual(fake_yf.Ticker.call_count, 1)  # second call skipped
+            with mock.patch.object(lookup_backoff, "FAILURE_TTL_SECONDS", 0):
+                cr.fetch_recent_earnings("MU", today=date(2026, 11, 20))
+            self.assertEqual(fake_yf.Ticker.call_count, 2)  # retried after the window
+
+    def test_tw_prefix_is_not_guessed_for_earnings(self):
+        self.assertIsNone(cr._yf_symbol("TW.6223"))
+
+    def test_index_header_without_columns_does_not_latch(self):
+        lines = [
+            "| 指数 | 收盘 | 涨跌 |", "|---|---|---|", "| 标普500指数 | 1 | 2 |", "",
+            "| 指数 | 最新 | 涨跌幅 |", "|---|---|---|", "| 标普500指数 | 7561.67 | -0.40% |",
+        ]
+        self.assertEqual(cmr._index_rows(lines), ["标普 7561.67 -0.40%"])
+
+    def test_title_with_markdown_chars_is_not_bolded(self):
+        from src.notification_sender.telegram_sender import _markdown_tables_to_lists
+
+        out = _markdown_tables_to_lists("| 指标 | 值 | 备注 |\n|---|---|---|\n| MA_5 | 1 | x |")
+        self.assertIn("▪️ MA_5", out)
+        self.assertNotIn("*MA_5*", out)
 
 
 if __name__ == "__main__":

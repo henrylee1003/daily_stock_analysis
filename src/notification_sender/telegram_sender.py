@@ -79,7 +79,11 @@ def _markdown_tables_to_lists(text: str) -> str:
                 if value.lower() in _EMPTY_CELL_VALUES:
                     continue
                 details.append(f"{header} {value}" if header else value)
-            out.append(f"▪️ *{title}*" if title else "▪️")
+            # Bold only when safe: _ * ` [ in the title would break legacy Markdown parsing
+            if title and not re.search(r'[_*`\[]', title):
+                out.append(f"▪️ *{title}*")
+            else:
+                out.append(f"▪️ {title}" if title else "▪️")
             if details:
                 out.append("　" + "｜".join(details))
     return '\n'.join(out)

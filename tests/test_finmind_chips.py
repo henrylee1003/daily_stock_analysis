@@ -48,12 +48,18 @@ class TestFinMindParsing(unittest.TestCase):
         inst = fc._institutional(previous + partial_today)
         self.assertEqual(inst["date"], "2026-11-16")
 
-    def test_total_failure_is_not_cached(self):
+    def test_total_failure_is_skipped_briefly_not_cached_for_the_day(self):
+        from src import lookup_backoff
+
+        lookup_backoff.clear()
         fc._get_tw_chips_cached.cache_clear()
         with mock.patch.object(fc, "_fetch", side_effect=RuntimeError("429")) as fetch:
             fc.get_tw_chips("2303.TW", today=date(2026, 11, 19))
             fc.get_tw_chips("2303.TW", today=date(2026, 11, 19))
-        self.assertEqual(fetch.call_count, 4)  # 2 datasets x 2 attempts
+            self.assertEqual(fetch.call_count, 2)  # second call inside the short window: skipped
+            with mock.patch.object(lookup_backoff, "FAILURE_TTL_SECONDS", 0):
+                fc.get_tw_chips("2303.TW", today=date(2026, 11, 19))
+        self.assertEqual(fetch.call_count, 4)  # retried after the window
 
     def test_lowercase_suffix(self):
         self.assertEqual(fc.tw_stock_id("6223.two"), "6223")

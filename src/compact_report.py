@@ -22,6 +22,7 @@ from typing import Any, Dict, List, Optional
 
 from src.env_flags import env_flag
 from src.finmind_chips import get_tw_chips
+from src.lookup_backoff import failed_recently, mark_failed
 from src.manual_holdings import get_manual_holding
 
 logger = logging.getLogger(__name__)
@@ -63,8 +64,9 @@ def _yf_symbol(code: str) -> Optional[str]:
     value = str(code or "").strip().upper()
     if value.startswith("US."):
         value = value[3:]
-    elif value.startswith("TW.") and value[3:].isdigit():
-        value = f"{value[3:]}.TW"
+    elif value.startswith("TW."):
+        # TW.<digits> does not say 上市 (.TW) or 上櫃 (.TWO); do not guess
+        return None
     if not value or value.isdigit():
         return None
     return value
@@ -83,11 +85,16 @@ def fetch_recent_earnings(code: str, today: Optional[date] = None) -> Optional[D
     symbol = _yf_symbol(code)
     if not symbol:
         return None
-    # The report is built several times per run; cache per (symbol, day)
+    # The report is built several times per run: successes are cached per (symbol, day),
+    # failures are skipped for a few minutes and then retried
+    day = today or _taipei_today()
+    key = ("earnings", symbol, day)
+    if failed_recently(key):
+        return None
     try:
-        return _fetch_recent_earnings_cached(symbol, today or _taipei_today())
+        return _fetch_recent_earnings_cached(symbol, day)
     except _LookupFailed:
-        # Failures are not cached, so a later report in the same process retries
+        mark_failed(key)
         return None
 
 

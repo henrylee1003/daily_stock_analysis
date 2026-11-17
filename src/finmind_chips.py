@@ -22,6 +22,8 @@ from datetime import date, timedelta
 from functools import lru_cache
 from typing import Any, Dict, List, Optional
 
+from src.lookup_backoff import failed_recently, mark_failed
+
 logger = logging.getLogger(__name__)
 
 _API_URL = "https://api.finmindtrade.com/api/v4/data"
@@ -161,9 +163,15 @@ def get_tw_chips(code: str, today: Optional[date] = None) -> Optional[Dict[str, 
     stock_id = tw_stock_id(code)
     if not stock_id:
         return None
+    day = today or date.today()
+    key = ("finmind", stock_id, day)
+    empty = {"institutional": None, "margin": None}
+    if failed_recently(key):
+        return empty
     try:
         # Copy so callers cannot mutate the cached dict
-        return dict(_get_tw_chips_cached(stock_id, today or date.today()))
+        return dict(_get_tw_chips_cached(stock_id, day))
     except _NothingFetched:
-        # Not cached: a later report in the same process retries
-        return {"institutional": None, "margin": None}
+        # Skipped for a few minutes, then retried (not cached for the day)
+        mark_failed(key)
+        return empty

@@ -28,9 +28,15 @@ TW_INVESTING_TERMS = (
     ("市淨率", "股價淨值比"),
     ("股息率", "殖利率"),
     ("歸母淨利潤", "稅後淨利"),
-    ("營收同比", "營收年增率"),
-    ("淨利同比", "淨利年增率"),
-    ("同比", "年增"),
+    # 同比 + verb ("同比增長20%") reads as 年增/年減; a bare 同比 label ("營收同比 13%") is 年增率
+    ("同比增長", "年增"),
+    ("同比成長", "年增"),
+    ("同比增加", "年增"),
+    ("同比上升", "年增"),
+    ("同比下降", "年減"),
+    ("同比減少", "年減"),
+    ("同比下滑", "年減"),
+    ("同比", "年增率"),
     ("環比", "較上期"),
     ("分紅", "配息"),
     ("倉位建議", "持股比重建議"),
@@ -53,8 +59,21 @@ TW_INVESTING_TERMS = (
     ("成交額", "成交金額"),
 )
 
-# Short terms that are also the start of unrelated words (同比例, 倉位置)
-_TERM_GUARDS = {"同比": "(?!例)", "倉位": "(?!置)"}
+# Short terms that are also the start of other words: 同比例, 倉位置, and
+# "增加倉位" (加倉 must not eat the 倉 of 倉位; the 倉位 rule handles it)
+_NOT_BEFORE_POSITION = "(?!位)"
+_TERM_GUARDS = {
+    "同比": "(?![例增成上下減])",
+    "倉位": "(?!置)",
+    "建倉": _NOT_BEFORE_POSITION,
+    "加倉": _NOT_BEFORE_POSITION,
+    "減倉": _NOT_BEFORE_POSITION,
+    "補倉": _NOT_BEFORE_POSITION,
+    "清倉": _NOT_BEFORE_POSITION,
+    "重倉": _NOT_BEFORE_POSITION,
+    "空倉": _NOT_BEFORE_POSITION,
+    "持倉": _NOT_BEFORE_POSITION,
+}
 _TERM_PATTERNS = tuple(
     (re.compile(re.escape(src) + _TERM_GUARDS.get(src, "")), dst) for src, dst in TW_INVESTING_TERMS
 )
