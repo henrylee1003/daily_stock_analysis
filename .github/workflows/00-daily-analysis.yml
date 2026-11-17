@@ -480,30 +480,29 @@ jobs:
             export STOCK_LIST="600519"
           fi
 
-          # Market scope: scheduled TW/US runs, or the manual "market" input
+          # Market scope: manual "market" input, or (scheduled runs) decided by Taipei time,
+          # so the cron strings above can change without touching this block.
+          # TW window: Mon-Fri 14:30-20:00; US window: Tue-Sat 05:00-11:00 (after the US close).
+          # A delayed scheduled run outside both windows is skipped (no pre-market reports).
           SCOPE="${{ github.event.inputs.market }}"
-          case "${{ github.event.schedule }}" in
-            "37 8 * * 1-5") SCOPE="tw" ;;
-            "13 22 * * 1-5") SCOPE="us" ;;
-          esac
-          SCOPE="${SCOPE:-all}"
-
-          # Delayed scheduled runs: skip when outside the useful window (Taipei time)
-          # TW: Mon-Fri 14:30-20:00; US: Tue-Sat 05:00-11:00 (after the US close)
           if [ "${{ github.event_name }}" = "schedule" ]; then
             TPE_HM=$((10#$(TZ=Asia/Taipei date +%H%M)))
             TPE_DOW=$(TZ=Asia/Taipei date +%u)
-            IN_WINDOW=0
-            if [ "$SCOPE" = "tw" ] && [ "$TPE_DOW" -le 5 ] && [ "$TPE_HM" -ge 1430 ] && [ "$TPE_HM" -lt 2000 ]; then IN_WINDOW=1; fi
-            if [ "$SCOPE" = "us" ] && [ "$TPE_DOW" -ge 2 ] && [ "$TPE_DOW" -le 6 ] && [ "$TPE_HM" -ge 500 ] && [ "$TPE_HM" -lt 1100 ]; then IN_WINDOW=1; fi
-            if [ "$IN_WINDOW" != "1" ]; then
-              echo "⏭️ Scheduled $SCOPE run started too late (Taipei $(TZ=Asia/Taipei date '+%a %H:%M')), skipping."
+            SCOPE=""
+            if [ "$TPE_DOW" -le 5 ] && [ "$TPE_HM" -ge 1430 ] && [ "$TPE_HM" -lt 2000 ]; then SCOPE="tw"; fi
+            if [ "$TPE_DOW" -ge 2 ] && [ "$TPE_DOW" -le 6 ] && [ "$TPE_HM" -ge 500 ] && [ "$TPE_HM" -lt 1100 ]; then SCOPE="us"; fi
+            if [ -z "$SCOPE" ]; then
+              echo "⏭️ Scheduled run started outside the TW/US windows (Taipei $(TZ=Asia/Taipei date '+%a %H:%M')), skipping."
               exit 0
             fi
           fi
+          SCOPE="${SCOPE:-all}"
           if [ "$SCOPE" = "tw" ] || [ "$SCOPE" = "us" ]; then
-            TW_LIST=$(echo "$STOCK_LIST" | tr ',' '\n' | sed 's/ //g' | grep -iE '\.TWO?$' | paste -sd, -)
-            US_LIST=$(echo "$STOCK_LIST" | tr ',' '\n' | sed 's/ //g' | grep -viE '\.TWO?$' | grep -v '^$' | paste -sd, -)
+            # TW: .TW / .TWO suffix or TW. prefix; US: letter-only tickers (e.g. MU, BRK.B).
+            # Bare digits (A-share) and HK codes belong to neither.
+            ALL_CODES=$(echo "$STOCK_LIST" | tr ',' '\n' | sed 's/ //g' | grep -v '^$')
+            TW_LIST=$(echo "$ALL_CODES" | grep -iE '(\.TWO?$|^TW\.)' | paste -sd, -)
+            US_LIST=$(echo "$ALL_CODES" | grep -E '^[A-Za-z][A-Za-z.-]*$' | grep -viE '(\.TWO?$|^TW\.)' | paste -sd, -)
             if [ "$SCOPE" = "tw" ]; then export STOCK_LIST="$TW_LIST"; else export STOCK_LIST="$US_LIST"; fi
             export MARKET_REVIEW_REGION="$SCOPE"
             echo "🌏 Market scope: $SCOPE | stocks: ${STOCK_LIST:-none}"
@@ -522,8 +521,15 @@ jobs:
 
           # 判断运行模式
           MODE="${{ github.event.inputs.mode || 'full' }}"
-          # No stocks in this market scope: only run the market review
-          if [ "${SCOPE_MARKET_ONLY:-}" = "1" ]; then MODE="market-only"; fi
+          # No stocks in this market scope: a full run becomes market-only;
+          # an explicit stocks-only run has nothing to do
+          if [ "${SCOPE_MARKET_ONLY:-}" = "1" ]; then
+            if [ "$MODE" = "stocks-only" ]; then
+              echo "⏭️ stocks-only for $SCOPE but no $SCOPE stocks in STOCK_LIST, skipping."
+              exit 0
+            fi
+            MODE="market-only"
+          fi
           
           echo "=========================================="
           echo "🚀 A股自选股智能分析系统"

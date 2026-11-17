@@ -126,20 +126,29 @@ def _fetch_tw_market_flows_cached(today: date, max_back_days: int) -> Optional[D
         if payload.get("stat") != "OK" or not payload.get("data"):
             continue
         net: Dict[str, float] = {"foreign": 0.0, "trust": 0.0, "dealer": 0.0, "total": 0.0}
+        matched = set()
         for row in payload["data"]:
             try:
                 name, diff = row[0], float(str(row[3]).replace(",", ""))
             except (IndexError, ValueError):
                 continue
             # Same 外资 definition as the per-stock line: exclude 外資自營商 (still in 合計)
+            key = None
             if name.startswith("外資及陸資"):
-                net["foreign"] += diff
+                key = "foreign"
             elif name.startswith("投信"):
-                net["trust"] += diff
+                key = "trust"
             elif name.startswith("自營商"):
-                net["dealer"] += diff
+                key = "dealer"
             elif name.startswith("合計"):
-                net["total"] = diff
+                key = "total"
+            if key:
+                net[key] += diff
+                matched.add(key)
+        # Renamed or missing rows must not be pushed as real zeros
+        if matched != set(net):
+            logger.warning("TWSE BFI82U rows incomplete for %s (matched=%s)", day, sorted(matched))
+            return None
         return {"date": day.isoformat(), **net}
     return None
 

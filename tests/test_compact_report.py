@@ -113,5 +113,58 @@ class TestCompactMarketFlows(unittest.TestCase):
             self.assertIn("重点：重点一句。", cmr.maybe_compact_market_report(text))
 
 
+class TestTelegramFormatting(unittest.TestCase):
+    def test_horizontal_rule_after_pipe_line_is_not_a_table(self):
+        from src.notification_sender.telegram_sender import _markdown_tables_to_lists
+
+        text = "涨跌 | 量能说明\n---\n下一段"
+        self.assertEqual(_markdown_tables_to_lists(text), text)
+
+    def test_bold_cell_title_is_not_double_wrapped(self):
+        from src.notification_sender.telegram_sender import _markdown_tables_to_lists
+
+        out = _markdown_tables_to_lists("| 指数 | 最新 | 涨跌幅 |\n|---|---|---|\n| **加权指数** | 23000 | +1% |")
+        self.assertIn("▪️ *加权指数*", out)
+        self.assertNotIn("***", out)
+
+    def test_plain_text_long_message_splits_on_rule(self):
+        from src.notification_sender.telegram_sender import _PLAIN_RULE, TelegramSender
+
+        sender = TelegramSender.__new__(TelegramSender)
+        sections = [f"段落{i} " + "字" * 1500 for i in range(4)]
+        content = f"\n{_PLAIN_RULE}\n".join(sections)
+        sent = []
+        with mock.patch.object(TelegramSender, "_send_telegram_message",
+                               side_effect=lambda *a, **k: sent.append(a[2]) or True):
+            self.assertTrue(sender._send_telegram_chunked("url", "chat", content, 4096))
+        self.assertGreaterEqual(len(sent), 2)
+        # Each chunk starts at a section boundary, never mid-section
+        for chunk in sent:
+            self.assertTrue(chunk.startswith("段落"), chunk[:10])
+
+
+class TestTaipeiTime(unittest.TestCase):
+    def test_report_date_uses_taipei_time(self):
+        from datetime import datetime
+
+        fake_now = datetime(2026, 11, 18, 6, 13)  # 22:13 UTC on 11/17
+        with mock.patch.object(cr, "_taipei_now", return_value=fake_now):
+            notifier = mock.MagicMock()
+            notifier._count_display_decisions.return_value = (0, 0, 0)
+            notifier._collect_models_used.return_value = []
+            out = cr.generate_compact_report(notifier, [])
+        self.assertIn("2026-11-18", out)
+
+
+class TestMarketFlowsIncomplete(unittest.TestCase):
+    def test_missing_total_row_is_not_reported_as_zero(self):
+        cmr._fetch_tw_market_flows_cached.cache_clear()
+        resp = mock.MagicMock()
+        resp.json.return_value = {"stat": "OK", "data": [["外資及陸資(不含外資自營商)", "0", "0", "1"]]}
+        with mock.patch("requests.get", return_value=resp):
+            self.assertIsNone(cmr.fetch_tw_market_flows(today=date(2026, 11, 17), max_back_days=0))
+        cmr._fetch_tw_market_flows_cached.cache_clear()
+
+
 if __name__ == "__main__":
     unittest.main()

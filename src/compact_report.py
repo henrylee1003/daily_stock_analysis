@@ -36,13 +36,18 @@ def compact_report_enabled() -> bool:
     return env_flag("REPORT_COMPACT")
 
 
-def _taipei_today() -> date:
+def _taipei_now() -> datetime:
+    """Runner clocks are UTC; every date/time the user sees is Taipei time."""
     try:
         from zoneinfo import ZoneInfo
 
-        return datetime.now(ZoneInfo("Asia/Taipei")).date()
+        return datetime.now(ZoneInfo("Asia/Taipei"))
     except Exception:
-        return (datetime.utcnow() + timedelta(hours=8)).date()
+        return datetime.utcnow() + timedelta(hours=8)
+
+
+def _taipei_today() -> date:
+    return _taipei_now().date()
 
 
 def _recent_days(today: date) -> set:
@@ -266,7 +271,7 @@ def _margin_line(chips: Optional[Dict[str, Any]]) -> Optional[str]:
 
 
 def generate_compact_report(notifier: Any, results: List[Any], report_date: Optional[str] = None) -> str:
-    report_date = report_date or datetime.now().strftime("%Y-%m-%d")
+    report_date = report_date or _taipei_now().strftime("%Y-%m-%d")
     report_language = notifier._get_report_language(results)
     lines = [f"📋 {report_date} 持股快报"]
     if not results:
@@ -304,7 +309,7 @@ def generate_compact_report(notifier: Any, results: List[Any], report_date: Opti
         if margin:
             lines.append(margin)
 
-    lines += ["", f"产生时间：{datetime.now().strftime('%Y-%m-%d %H:%M')}"]
+    lines += ["", f"产生时间：{_taipei_now().strftime('%Y-%m-%d %H:%M')}"]
     models = notifier._collect_models_used(results)
     if models:
         lines.append(f"分析模型：{', '.join(models)}")

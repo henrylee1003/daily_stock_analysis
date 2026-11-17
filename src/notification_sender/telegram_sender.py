@@ -46,6 +46,8 @@ def _markdown_tables_to_lists(text: str) -> str:
         is_table_start = (
             '|' in line
             and i + 1 < len(lines)
+            # A lone "---" is a horizontal rule, not a table separator
+            and '|' in lines[i + 1]
             and _TABLE_SEP_RE.match(lines[i + 1])
         )
         if not is_table_start:
@@ -67,7 +69,8 @@ def _markdown_tables_to_lists(text: str) -> str:
                     continue
                 out.append(f"• {label}：{value}" if label else f"• {value}")
                 continue
-            title = cells[0]
+            # Cells may already be bold (**x**); strip it before wrapping in *...*
+            title = cells[0].replace('**', '').strip()
             # A bare number as row title is meaningless; prefix the first header
             if title and headers and headers[0] and _NUMERIC_CELL_RE.match(title):
                 title = f"{headers[0]} {title}"
@@ -80,6 +83,9 @@ def _markdown_tables_to_lists(text: str) -> str:
             if details:
                 out.append("　" + "｜".join(details))
     return '\n'.join(out)
+
+
+_PLAIN_RULE = '──────────'
 
 
 def _telegram_plain_text_enabled() -> bool:
@@ -98,7 +104,7 @@ def _markdown_to_plain_text(text: str) -> str:
     # Blockquotes
     result = re.sub(r'^[ \t]*>[ \t]?', '', result, flags=re.MULTILINE)
     # Horizontal rules
-    result = re.sub(r'^[ \t]*(-{3,}|\*{3,}|_{3,})[ \t]*$', '──────────', result, flags=re.MULTILINE)
+    result = re.sub(r'^[ \t]*(-{3,}|\*{3,}|_{3,})[ \t]*$', _PLAIN_RULE, result, flags=re.MULTILINE)
     # Bold / italic / inline code markers
     result = re.sub(r'\*\*(.+?)\*\*', r'\1', result)
     result = re.sub(r'__(.+?)__', r'\1', result)
@@ -381,8 +387,11 @@ class TelegramSender:
     ) -> bool:
         """按已转换的 Telegram Markdown payload 分段发送长消息。"""
         # 按段落分割
-        sections = content.split("\n---\n")
         delimiter = "\n---\n"
+        # Plain-text mode turns "---" rules into _PLAIN_RULE; split on that instead
+        if delimiter not in content and f"\n{_PLAIN_RULE}\n" in content:
+            delimiter = f"\n{_PLAIN_RULE}\n"
+        sections = content.split(delimiter)
         delimiter_length = len(delimiter)
 
         current_chunk = []
@@ -395,7 +404,7 @@ class TelegramSender:
             if not current_chunk:
                 return all_success
 
-            chunk_content = "\n---\n".join(current_chunk)
+            chunk_content = delimiter.join(current_chunk)
             logger.info(f"发送 Telegram 消息块 {chunk_index}...")
             chunk_index += 1
             current_chunk = []
