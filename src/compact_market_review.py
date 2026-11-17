@@ -1,4 +1,9 @@
 # -*- coding: utf-8 -*-
+# Usage: from src.compact_market_review import compact_market_review; compact_market_review(full_markdown)
+# Description: Shrink the LLM market review to index line, takeaway, strategy and TWSE market-wide flows
+# Input: Full market review markdown (one or more markets); env REPORT_COMPACT
+# Output: Compact markdown string (original text if it cannot be parsed)
+# Dependencies: requests (already in requirements.txt)
 """Compact market review for phone push (REPORT_COMPACT=true).
 
 Turns the long LLM market review into a few lines per market: index moves,

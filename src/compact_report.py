@@ -1,4 +1,9 @@
 # -*- coding: utf-8 -*-
+# Usage: from src.compact_report import generate_compact_report (called by NotificationService when REPORT_COMPACT=true)
+# Description: Short per-stock phone report: conclusion, own position, advice, recent earnings, TW chips
+# Input: NotificationService instance + list of AnalysisResult; env PORTFOLIO_HOLDINGS, REPORT_COMPACT
+# Output: Markdown string
+# Dependencies: yfinance, requests (already in requirements.txt)
 """Compact per-stock report for phone push (REPORT_COMPACT=true).
 
 Each stock shows only: signal + one-line conclusion, the user's own position
@@ -157,15 +162,31 @@ def _earnings_lines(notifier: Any, result: Any, blocks: Dict[str, Any]) -> List[
 
 
 def _fmt_lots(value: Any) -> Optional[str]:
+    """Shares -> lots (1 张 = 1000 股); under one lot keeps shares so it never shows "-0 张"."""
     shares = _finite(value)
     if shares is None:
         return None
+    if shares == 0:
+        return "0 张"
+    if abs(shares) < 1000:
+        return f"{shares:+,.0f} 股"
     return f"{shares / 1000:+,.0f} 张"
 
 
-def _date_note(iso_date: str) -> str:
-    """'2026-11-17' -> '（11/17）', adding '，非当日' when it is not today (Taipei)."""
-    if len(iso_date) != 10:
+def _iso_date(raw: Any) -> str:
+    """'20261117' or '2026-11-17' -> '2026-11-17'; '' when unrecognized."""
+    text = str(raw or "").strip()
+    if len(text) == 8 and text.isdigit():
+        return f"{text[:4]}-{text[4:6]}-{text[6:]}"
+    if len(text) == 10 and text[4] == "-" and text[7] == "-":
+        return text
+    return ""
+
+
+def _date_note(raw_date: Any) -> str:
+    """Date -> '（11/17）', adding '，非当日' when it is not today (Taipei)."""
+    iso_date = _iso_date(raw_date)
+    if not iso_date:
         return ""
     note = f"（{iso_date[5:7]}/{iso_date[8:10]}"
     if iso_date != _taipei_today().isoformat():
@@ -173,16 +194,43 @@ def _date_note(iso_date: str) -> str:
     return note + "）"
 
 
-def _finmind_flow_line(chips: Optional[Dict[str, Any]]) -> Optional[str]:
-    """Institutional flows from FinMind (covers TWSE and TPEx stocks), in lots."""
+def _finmind_flows(chips: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     inst = (chips or {}).get("institutional")
-    if not inst:
+    if not inst or not _iso_date(inst.get("date")):
         return None
-    parts = [
-        f"{label} {_fmt_lots(inst[key])}"
-        for label, key in (("外资", "foreign"), ("投信", "trust"), ("自营商", "dealer"), ("合计", "total"))
-    ]
-    return f"💰 三大法人{_date_note(inst['date'])}：" + "｜".join(parts)
+    return {"date": _iso_date(inst["date"]), **{k: inst.get(k) for k in ("foreign", "trust", "dealer", "total")}}
+
+
+def _twse_flows(blocks: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    if blocks.get("institution_status") != "ok":
+        return None
+    inst = blocks.get("institution") or {}
+    flows = {
+        "foreign": inst.get("foreign_net"),
+        "trust": inst.get("trust_net"),
+        "dealer": inst.get("dealer_net"),
+        "total": inst.get("total_net"),
+    }
+    if all(_finite(v) is None for v in flows.values()):
+        return None
+    return {"date": _iso_date(inst.get("date")), **flows}
+
+
+def _flow_line(chips: Optional[Dict[str, Any]], blocks: Dict[str, Any]) -> Optional[str]:
+    """Institutional net buy/sell; uses whichever source (FinMind / TWSE) has the newer date."""
+    candidates = [f for f in (_twse_flows(blocks), _finmind_flows(chips)) if f]
+    if not candidates:
+        return None
+    # max() keeps the first on ties, so the official TWSE block wins a same-day tie
+    flows = max(candidates, key=lambda f: f["date"])
+    parts = []
+    for label, key in (("外资", "foreign"), ("投信", "trust"), ("自营商", "dealer"), ("合计", "total")):
+        lots = _fmt_lots(flows.get(key))
+        if lots:
+            parts.append(f"{label} {lots}")
+    if not parts:
+        return None
+    return f"💰 三大法人{_date_note(flows['date'])}：" + "｜".join(parts)
 
 
 def _margin_line(chips: Optional[Dict[str, Any]]) -> Optional[str]:
@@ -195,28 +243,6 @@ def _margin_line(chips: Optional[Dict[str, Any]]) -> Optional[str]:
         f"融资 {margin['margin']:,} 张（{margin['margin_change']:+,}）｜"
         f"融券 {margin['short']:,} 张（{margin['short_change']:+,}）"
     )
-
-
-def _flow_line(notifier: Any, blocks: Dict[str, Any]) -> Optional[str]:
-    """Taiwan institutional net buy/sell in lots, e.g. 外资 +10,018 张."""
-    if blocks.get("institution_status") != "ok":
-        return None
-    inst = blocks.get("institution") or {}
-    parts = []
-    for label, key in (("外资", "foreign_net"), ("投信", "trust_net"), ("自营商", "dealer_net"), ("合计", "total_net")):
-        lots = _fmt_lots(inst.get(key))
-        if lots:
-            parts.append(f"{label} {lots}")
-    if not parts:
-        return None
-    raw_date = str(inst.get("date") or "")
-    note = ""
-    if len(raw_date) == 8 and raw_date.isdigit():
-        note = f"（{raw_date[4:6]}/{raw_date[6:8]}"
-        if raw_date != _taipei_today().strftime("%Y%m%d"):
-            note += "，非当日"
-        note += "）"
-    return f"💰 三大法人{note}：" + "｜".join(parts)
 
 
 def generate_compact_report(notifier: Any, results: List[Any], report_date: Optional[str] = None) -> str:
@@ -251,7 +277,7 @@ def generate_compact_report(notifier: Any, results: List[Any], report_date: Opti
         blocks = notifier._get_fundamental_blocks(result)
         lines += _earnings_lines(notifier, result, blocks)
         chips = get_tw_chips(result.code, today=_taipei_today())
-        flow = _finmind_flow_line(chips) or _flow_line(notifier, blocks)
+        flow = _flow_line(chips, blocks)
         if flow:
             lines.append(flow)
         margin = _margin_line(chips)

@@ -1,8 +1,17 @@
 # -*- coding: utf-8 -*-
-"""Taiwan chip data (institutional flows + margin trading) from the FinMind API.
+# Usage: from src.finmind_chips import get_tw_chips; get_tw_chips("6223.TWO")
+# Description: Taiwan chip data (institutional flows + margin trading) from the FinMind API,
+#              for both TWSE (.TW) and TPEx (.TWO) stocks. Results are cached per (code, day).
+# Input: Taiwan stock code with .TW / .TWO suffix; optional env FINMIND_TOKEN
+# Output: {"institutional": {date, foreign, trust, dealer, total} (shares) | None,
+#          "margin": {date, margin, margin_change, short, short_change} (lots) | None}
+# Dependencies: requests (already in requirements.txt)
+"""Taiwan chip data from FinMind.
 
-Covers both TWSE (.TW) and TPEx (.TWO) stocks. FINMIND_TOKEN is optional;
-without it FinMind allows a smaller hourly quota, enough for a few stocks.
+``foreign`` follows the TWSE T86 definition (外陸資, excluding 外資自營商) so it
+matches the TWSE fallback; ``total`` includes every investor type like T86's
+三大法人合計. FINMIND_TOKEN is optional; without it FinMind allows a smaller
+hourly quota, enough for a few stocks.
 """
 
 from __future__ import annotations
@@ -10,12 +19,14 @@ from __future__ import annotations
 import logging
 import os
 from datetime import date, timedelta
+from functools import lru_cache
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
 _API_URL = "https://api.finmindtrade.com/api/v4/data"
-_FOREIGN = ("Foreign_Investor", "Foreign_Dealer_Self")
+_FOREIGN = ("Foreign_Investor",)
+_FOREIGN_DEALER = ("Foreign_Dealer_Self",)
 _TRUST = ("Investment_Trust",)
 _DEALER = ("Dealer_self", "Dealer_Hedging")
 
@@ -38,6 +49,7 @@ def _fetch(dataset: str, stock_id: str, start: date) -> List[Dict[str, Any]]:
     if token:
         headers["Authorization"] = f"Bearer {token}"
     resp = requests.get(_API_URL, params=params, headers=headers, timeout=15)
+    resp.raise_for_status()
     payload = resp.json()
     if payload.get("status") != 200:
         raise RuntimeError(f"FinMind {dataset} status={payload.get('status')} msg={payload.get('msg')}")
@@ -46,24 +58,43 @@ def _fetch(dataset: str, stock_id: str, start: date) -> List[Dict[str, Any]]:
 
 
 def _institutional(rows: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
-    """Net buy/sell in shares for the latest date."""
+    """Net buy/sell in shares for the latest date; None when no known investor row matched."""
     if not rows:
         return None
     latest = max(str(r.get("date") or "") for r in rows)
-    net = {"foreign": 0.0, "trust": 0.0, "dealer": 0.0}
+    net = {"foreign": 0.0, "trust": 0.0, "dealer": 0.0, "foreign_dealer": 0.0}
+    matched = set()
     for row in rows:
         if str(row.get("date")) != latest:
             continue
-        diff = float(row.get("buy") or 0) - float(row.get("sell") or 0)
         name = row.get("name")
+        try:
+            diff = float(row.get("buy") or 0) - float(row.get("sell") or 0)
+        except (TypeError, ValueError):
+            continue
         if name in _FOREIGN:
             net["foreign"] += diff
+            matched.add("foreign")
+        elif name in _FOREIGN_DEALER:
+            net["foreign_dealer"] += diff
         elif name in _TRUST:
             net["trust"] += diff
+            matched.add("trust")
         elif name in _DEALER:
             net["dealer"] += diff
-    net["total"] = net["foreign"] + net["trust"] + net["dealer"]
-    return {"date": latest, **net}
+            matched.add("dealer")
+    # Partial or renamed data must not be shown as real zeros
+    if matched != {"foreign", "trust", "dealer"}:
+        logger.warning("FinMind institutional rows incomplete for %s (matched=%s)", latest, sorted(matched))
+        return None
+    total = net["foreign"] + net["foreign_dealer"] + net["trust"] + net["dealer"]
+    return {
+        "date": latest,
+        "foreign": net["foreign"],
+        "trust": net["trust"],
+        "dealer": net["dealer"],
+        "total": total,
+    }
 
 
 def _margin(rows: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
@@ -77,6 +108,7 @@ def _margin(rows: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
         short = int(row["ShortSaleTodayBalance"])
         short_prev = int(row["ShortSaleYesterdayBalance"])
     except (KeyError, TypeError, ValueError):
+        logger.warning("FinMind margin row has unexpected fields: %s", sorted(row.keys()))
         return None
     return {
         "date": str(row.get("date")),
@@ -87,21 +119,27 @@ def _margin(rows: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     }
 
 
-def get_tw_chips(code: str, today: Optional[date] = None) -> Optional[Dict[str, Any]]:
-    """Return {'institutional': {...}|None, 'margin': {...}|None} or None for non-TW codes."""
-    stock_id = tw_stock_id(code)
-    if not stock_id:
-        return None
-    start = (today or date.today()) - timedelta(days=10)
+@lru_cache(maxsize=64)
+def _get_tw_chips_cached(stock_id: str, day: date) -> Dict[str, Any]:
+    start = day - timedelta(days=10)
     result: Dict[str, Any] = {"institutional": None, "margin": None}
     try:
         result["institutional"] = _institutional(
             _fetch("TaiwanStockInstitutionalInvestorsBuySell", stock_id, start)
         )
     except Exception as e:
-        logger.info("FinMind institutional fetch failed for %s: %s", stock_id, e)
+        logger.warning("FinMind institutional fetch failed for %s: %s", stock_id, e)
     try:
         result["margin"] = _margin(_fetch("TaiwanStockMarginPurchaseShortSale", stock_id, start))
     except Exception as e:
-        logger.info("FinMind margin fetch failed for %s: %s", stock_id, e)
+        logger.warning("FinMind margin fetch failed for %s: %s", stock_id, e)
     return result
+
+
+def get_tw_chips(code: str, today: Optional[date] = None) -> Optional[Dict[str, Any]]:
+    """Return chip data for a Taiwan stock (cached per stock and day), or None for non-TW codes."""
+    stock_id = tw_stock_id(code)
+    if not stock_id:
+        return None
+    # Copy so callers cannot mutate the cached dict
+    return dict(_get_tw_chips_cached(stock_id, today or date.today()))

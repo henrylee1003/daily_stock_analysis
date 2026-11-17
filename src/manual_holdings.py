@@ -1,4 +1,9 @@
 # -*- coding: utf-8 -*-
+# Usage: from src.manual_holdings import get_manual_holding; get_manual_holding("2303.TW")
+# Description: Read the user's positions from PORTFOLIO_HOLDINGS and render a prompt section
+# Input: env PORTFOLIO_HOLDINGS = "CODE:QTY:AVG_COST,..." (keep in a GitHub Secret)
+# Output: portfolio_context dict / prompt text
+# Dependencies: none (standard library only)
 """Manual holdings from the PORTFOLIO_HOLDINGS env var.
 
 Format: ``CODE:QUANTITY:AVG_COST`` separated by commas, e.g.

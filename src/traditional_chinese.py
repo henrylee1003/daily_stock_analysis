@@ -1,4 +1,9 @@
 # -*- coding: utf-8 -*-
+# Usage: from src.traditional_chinese import to_traditional_chinese; to_traditional_chinese(text)
+# Description: Simplified -> Taiwan Traditional Chinese with Taiwan investing terms
+# Input: Text; env REPORT_TRADITIONAL_CHINESE=true to enable
+# Output: Converted text (original text on error)
+# Dependencies: pip install opencc-python-reimplemented
 """Optional Simplified -> Taiwan Traditional Chinese conversion for outgoing messages."""
 
 import logging
